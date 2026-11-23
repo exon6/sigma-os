@@ -1,55 +1,60 @@
 <!DOCTYPE html>
-<html lang="ko" data-theme="dark">
+<html lang="ko" data-theme="dark" data-market="us">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>시그마 OS · 개인 볼트 &amp; 수집함</title>
-  <meta name="description" content="시그마 OS 비공개 Obsidian 볼트 뷰어, 수집함, 생각 노트, 6종목 투자 대시보드 및 LLM 위키" />
+  <title>SIGMA OS // ORDERBLOCK VAULT &amp; INBOX</title>
+  <meta name="description" content="ORDERBLOCK Finance 디자인 시스템 기반 시그마 OS 비공개 Obsidian 볼트 뷰어, 수집함, 생각 노트 및 6종목 투자 터미널" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand" id="brand-home" title="시그마 OS 홈(분류하기)으로 이동">
-      <span class="brand-mark">Σ</span>
-      <span>시그마 OS</span>
-      <span class="brand-sub" id="connection-badge">로딩 중</span>
+  <header class="ob-nav">
+    <div class="ob-nav__mark" id="brand-home" title="SIGMA OS 홈(분류하기)으로 이동">
+      <span class="ob-ticker">Σ</span>
+      <span>SIGMA OS</span>
+      <span class="ob-badge" id="connection-badge">LOADING</span>
     </div>
 
-    <nav class="nav-tabs" aria-label="주요 화면 전환">
-      <button class="nav-tab active" data-tab="triage" id="tab-btn-triage">🏠 분류하기 · 홈</button>
-      <button class="nav-tab" data-tab="inbox" id="tab-btn-inbox">📥 시그마 수집함</button>
-      <button class="nav-tab" data-tab="thoughts" id="tab-btn-thoughts">🧠 생각 · 참고 · 영구노트</button>
-      <button class="nav-tab" data-tab="investing" id="tab-btn-investing">📈 투자 &amp; LLM 위키</button>
-      <button class="nav-tab" data-tab="explorer" id="tab-btn-explorer">📁 전체 볼트 탐색기</button>
+    <nav class="ob-nav__links" aria-label="주요 화면 전환">
+      <button class="ob-nav__link is-active" data-tab="triage" id="tab-btn-triage">01 // 분류하기 · 홈</button>
+      <button class="ob-nav__link" data-tab="inbox" id="tab-btn-inbox">02 // 시그마 수집함</button>
+      <button class="ob-nav__link" data-tab="thoughts" id="tab-btn-thoughts">03 // 생각 · 참고 · 영구노트</button>
+      <button class="ob-nav__link" data-tab="investing" id="tab-btn-investing">04 // 투자 &amp; LLM 위키</button>
+      <button class="ob-nav__link" data-tab="explorer" id="tab-btn-explorer">05 // 전체 볼트 탐색기</button>
     </nav>
 
-    <div class="top-actions">
-      <button class="search-trigger" id="btn-open-search" title="볼트 전체 검색 (Ctrl+K 또는 /)">
-        <span>🔍 노트·위키·클리핑 검색...</span>
-        <kbd>Ctrl K</kbd>
-      </button>
-      <button class="btn btn-sm" id="btn-sync-now" title="GitHub 비공개 볼트에서 최신 변경사항 새로고침">🔄 동기화</button>
-      <button class="btn btn-sm" id="btn-open-auth" title="비공개 GitHub 연결 및 간편 비밀번호 설정">🔒 보안 연결</button>
-      <button class="btn btn-sm" id="btn-theme-toggle" title="다크/라이트 테마 전환">🌗</button>
+    <div class="ob-nav__actions">
+      <button class="ob-btn ob-btn--sm" id="btn-open-search" title="볼트 전체 검색 (Ctrl+K)">SEARCH [CTRL+K]</button>
+      <button class="ob-btn ob-btn--sm" id="btn-market-toggle" title="등락 색상 기준 전환 (US: 초록 상승 / KR: 빨강 상승)">MKT: US ▲</button>
+      <button class="ob-btn ob-btn--sm" id="btn-sync-now" title="GitHub 비공개 볼트에서 최신 변경사항 새로고침">SYNC ↗</button>
+      <button class="ob-btn ob-btn--sm" id="btn-open-auth" title="비공개 GitHub 연결 및 간편 비밀번호 설정">AUTH ■</button>
+      <button class="ob-btn ob-btn--sm" id="btn-theme-toggle" title="DARK ABYSS / LIGHT PEARL 테마 전환">ABYSS / PEARL</button>
     </div>
   </header>
 
   <main class="workspace">
-    <h1 class="sr-only" style="position:absolute;left:-9999px;">시그마 OS 통합 볼트 및 수집함 워크스페이스</h1>
-    <div id="stats-container" class="stats-strip"></div>
+    <h1 class="sr-only" style="position:absolute;left:-9999px;">SIGMA OS ORDERBLOCK FINANCE VAULT &amp; INBOX TERMINAL</h1>
+    <div id="stats-container" class="ob-statrow"></div>
     <div id="view-container"></div>
   </main>
+
+  <footer class="ob-footer">
+    <div class="ob-footer__base">
+      <div><strong>SIGMA OS // ORDERBLOCK FINANCE TERMINAL</strong> — RAW STRUCTURE. DEEP WATER. CLEAR SIGNALS.</div>
+      <div id="footer-meta">VAULT: EXON6/OBSIDIAN-VAULT · PRIVATE API DIRECT · ZERO RADIUS</div>
+    </div>
+  </footer>
 
   <!-- Search Modal -->
   <div class="modal-backdrop" id="search-modal">
     <div class="modal">
       <div class="modal-header">
-        <strong>🔍 볼트 전체 검색 (제목 · 본문 · 태그 · 티커 · 속성)</strong>
-        <button class="btn btn-sm" id="btn-close-search">닫기 (Esc)</button>
+        <span>SEARCH // 볼트 전체 검색 (제목 · 본문 · 태그 · 티커 · 속성)</span>
+        <button class="ob-btn ob-btn--xs" id="btn-close-search">CLOSE [ESC]</button>
       </div>
       <div class="modal-body">
-        <input type="text" class="input" id="search-input" placeholder="검색어 입력 (예: NVDA, Vera Rubin, 포카요케, Lumentum, 신용 점검, 할일...)" autocomplete="off" />
-        <div id="search-results" style="margin-top:12px;"></div>
+        <input type="text" class="input" id="search-input" placeholder="QUERY: NVDA, VERA RUBIN, 포카요케, LUMENTUM, 신용 점검, 할일..." autocomplete="off" />
+        <div id="search-results" style="margin-top:16px;"></div>
       </div>
     </div>
   </div>
@@ -58,8 +63,8 @@
   <div class="modal-backdrop" id="auth-modal">
     <div class="modal">
       <div class="modal-header">
-        <strong>🔒 비공개 GitHub 볼트 연결 &amp; 간편 비밀번호 잠금</strong>
-        <button class="btn btn-sm" id="btn-close-auth">닫기</button>
+        <span>AUTH // 비공개 GITHUB 볼트 연결 &amp; 모든 기기 간편 비밀번호 잠금</span>
+        <button class="ob-btn ob-btn--xs" id="btn-close-auth">CLOSE [✕]</button>
       </div>
       <div class="modal-body" id="auth-modal-body"></div>
     </div>

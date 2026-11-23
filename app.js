@@ -1,10 +1,12 @@
-/* Sigma OS All-in-One Web App (100% Private Vault Viewer + Built-in Inbox + Editor) */
+/* SIGMA OS // ORDERBLOCK FINANCE TERMINAL (Vault Viewer + Built-in Inbox + Zero-Prompt Auto Login) */
 (function () {
   "use strict";
 
   const REPO_DEFAULT = "exon6/obsidian-vault";
+  const SHELL_REPO = "exon6/sigma-os";
   const STORAGE_KEYS = {
     theme: "sigma_web_theme",
+    market: "sigma_web_market",
     repo: "sigma_web_repo",
     tokenPlain: "sigma_web_pat",
     tokenEnc: "sigma_web_pat_enc",
@@ -12,7 +14,8 @@
 
   const state = {
     repo: localStorage.getItem(STORAGE_KEYS.repo) || REPO_DEFAULT,
-    token: sessionStorage.getItem(STORAGE_KEYS.tokenPlain) || localStorage.getItem(STORAGE_KEYS.tokenPlain) || "",
+    token: localStorage.getItem(STORAGE_KEYS.tokenPlain) || sessionStorage.getItem(STORAGE_KEYS.tokenPlain) || "",
+    cloudVaultEnc: null, // Loaded from ./auth-vault.json if present on GitHub Pages
     mode: "loading", // "local" | "github" | "locked"
     generatedAt: "",
     notes: [],
@@ -58,7 +61,7 @@
     el.textContent = msg;
     el.classList.add("show");
     clearTimeout(showToast._timer);
-    showToast._timer = setTimeout(() => el.classList.remove("show"), 3200);
+    showToast._timer = setTimeout(() => el.classList.remove("show"), 3400);
   }
 
   function cleanWikiTarget(val) {
@@ -70,12 +73,12 @@
       .trim();
   }
 
-  /* -------------------- WebCrypto AES-256-GCM Pin Lock -------------------- */
+  /* -------------------- WebCrypto AES-256-GCM -------------------- */
   async function deriveKey(password, saltBytes) {
     const enc = new TextEncoder();
     const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
     return crypto.subtle.deriveKey(
-      { name: "PBKDF2", salt: saltBytes, iterations: 200000, hash: "SHA-256" },
+      { name: "PBKDF2", salt: saltBytes, iterations: 250000, hash: "SHA-256" },
       keyMaterial,
       { name: "AES-GCM", length: 256 },
       false,
@@ -111,7 +114,7 @@
   }
 
   async function decryptTokenWithPassword(payloadJson, password) {
-    const data = JSON.parse(payloadJson);
+    const data = typeof payloadJson === "string" ? JSON.parse(payloadJson) : payloadJson;
     const salt = b64ToBytes(data.salt);
     const iv = b64ToBytes(data.iv);
     const ct = b64ToBytes(data.ct);
@@ -133,7 +136,7 @@
   }
 
   async function ghFetch(apiPath, options = {}) {
-    if (!state.token) throw new Error("GitHub 토큰이 설정되지 않았습니다. 상단 [🔒 보안 연결]에서 토큰을 입력해주세요.");
+    if (!state.token) throw new Error("ERROR — GitHub PAT 토큰이 없습니다. 상단 [AUTH ■]에서 1회 연결해주세요.");
     const headers = Object.assign(
       {
         Authorization: `Bearer ${state.token}`,
@@ -150,7 +153,7 @@
     });
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
-      throw new Error(`GitHub API 오류 (${res.status}): ${errText.slice(0, 180)}`);
+      throw new Error(`ERROR — GitHub API (${res.status}): ${errText.slice(0, 180)}`);
     }
     if (options.raw) return res.text();
     if (res.status === 204) return null;
@@ -161,15 +164,15 @@
     return ghFetch(`/repos/${state.repo}/contents/${encodeRepoPath(relPath)}?ref=main`, { raw: true });
   }
 
-  async function ghPutFile(relPath, contentStr, commitMsg) {
+  async function ghPutFile(relPath, contentStr, commitMsg, targetRepo = state.repo) {
     let sha = undefined;
     try {
-      const existing = await ghFetch(`/repos/${state.repo}/contents/${encodeRepoPath(relPath)}?ref=main`);
+      const existing = await ghFetch(`/repos/${targetRepo}/contents/${encodeRepoPath(relPath)}?ref=main`);
       if (existing && existing.sha) sha = existing.sha;
     } catch (_) {
       // new file
     }
-    return ghFetch(`/repos/${state.repo}/contents/${encodeRepoPath(relPath)}`, {
+    return ghFetch(`/repos/${targetRepo}/contents/${encodeRepoPath(relPath)}`, {
       method: "PUT",
       body: {
         message: commitMsg,
@@ -299,17 +302,31 @@
     return note;
   }
 
+  async function checkCloudAuthVault() {
+    try {
+      const res = await fetch("./auth-vault.json", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.ct && data.salt && data.iv) {
+          state.cloudVaultEnc = JSON.stringify(data);
+        }
+      }
+    } catch (_) {}
+  }
+
   async function loadVaultData() {
     const badge = document.getElementById("connection-badge");
-    // 1. If GitHub token is present, prefer live private GitHub fetch (or fallback to local index)
+    await checkCloudAuthVault();
+
+    // 1. If GitHub token is present in localStorage/sessionStorage, auto-login immediately!
     if (state.token) {
       try {
-        if (badge) badge.textContent = "GitHub 동기화 중...";
+        if (badge) badge.textContent = "SYNCING...";
         const rawJson = await ghGetFileRaw(".sigma-sync/vault-index.json");
         const parsed = JSON.parse(rawJson);
         indexNotes(parsed);
         state.mode = "github";
-        if (badge) badge.textContent = `🔒 비공개 GitHub 연결됨 (${state.notes.length}개 노트)`;
+        if (badge) badge.textContent = `PRIVATE LIVE · ${state.notes.length} NOTES`;
         renderAll();
         return;
       } catch (err) {
@@ -327,26 +344,23 @@
           state.mode = state.token ? "github" : "local";
           if (badge) {
             badge.textContent = state.token
-              ? `🔒 GitHub + 로컬 볼트 (${state.notes.length}개 노트)`
-              : `💻 로컬 볼트 미리보기 (${state.notes.length}개 노트)`;
+              ? `GITHUB + LOCAL · ${state.notes.length} NOTES`
+              : `LOCAL PREVIEW · ${state.notes.length} NOTES`;
           }
           renderAll();
           return;
         }
-      } catch (_) {
-        // ignore
-      }
+      } catch (_) {}
     }
 
-    // 3. Otherwise locked (hosted on public GitHub Pages without unlocked token)
+    // 3. Otherwise locked (hosted on public GitHub Pages without unlocked token on this device yet)
     state.mode = "locked";
-    if (badge) badge.textContent = "🔐 잠금 상태 (인증 필요)";
+    if (badge) badge.textContent = "LOCKED ■";
     renderAll();
   }
 
   async function ensureFullNoteBody(note) {
     if (!note || !note.truncated) return;
-    // Try local file first, then GitHub API
     try {
       const localRes = await fetch(`../../${encodeRepoPath(note.path)}`, { cache: "no-store" });
       if (localRes.ok) {
@@ -374,6 +388,14 @@
     return state.byName[stem] || null;
   }
 
+  /* -------------------- ORDERBLOCK Direction & Number Formatter -------------------- */
+  function colorizeNumbersInHtml(html) {
+    // Highlight explicit directional strings like +103%, -9.1B, ▲ +25%, etc.
+    return html
+      .replace(/(\+\d+(?:\.\d+)?%)/g, '<span class="ob-up">▲ $1</span>')
+      .replace(/(-\$\d+(?:\.\d+)?[BMK])/g, '<span class="ob-down">▼ $1</span>');
+  }
+
   /* -------------------- Obsidian .base Evaluator -------------------- */
   function evaluateBaseEmbed(baseSpec, contextNote) {
     const [baseFile, viewName = ""] = baseSpec.split("#");
@@ -386,30 +408,29 @@
           .filter((n) => n.top_folder === "Clippings" && !n.has_source_backlink)
           .sort((a, b) => a.ctime.localeCompare(b.ctime));
         return renderBaseTable(
-          `📥 위키 반영 대기 클리핑 (${rows.length}건)`,
-          ["클리핑 파일 (Clippings/)", "출처 URL", "저장일", "경과일"],
+          `INGEST QUEUE // 위키 반영 대기 클리핑 (${rows.length})`,
+          ["CLIPPING FILE (CLIPPINGS/)", "SOURCE", "CAPTURED", "AGE"],
           rows.map((n) => [
             noteLinkHTML(n.path, n.name),
-            n.props.source ? `<a href="${esc(n.props.source)}" target="_blank" rel="noopener" class="wikilink">원문 ↗</a>` : "-",
-            esc(n.ctime),
-            `${daysBetween(today, n.ctime) ?? 0}일`,
+            n.props.source ? `<a href="${esc(n.props.source)}" target="_blank" rel="noopener" class="wikilink">LINK ↗</a>` : "−",
+            `<span class="ob-mono">${esc(n.ctime)}</span>`,
+            `<span class="ob-mono">${daysBetween(today, n.ctime) ?? 0}D</span>`,
           ])
         );
       }
-      // inbox.base#수집함
       const rows = state.notes.filter(
         (n) => n.top_folder === "0. Inbox" && !n.props.entity && n.props.done !== true
       );
       return renderBaseTable(
-        `📥 수집함 미분류 메모 (${rows.length}건)`,
-        ["노트", "종류", "박스", "저장일"],
+        `INBOX // 수집함 미분류 메모 (${rows.length})`,
+        ["NOTE", "ENTITY", "BOX", "CAPTURED"],
         rows.map((n) => [
           noteLinkHTML(n.path, n.name),
-          esc(n.props.entity || "미분류"),
+          `<span class="ob-badge">${esc(n.props.entity || "UNCLASSIFIED")}</span>`,
           formatPropVal(n.props.box),
-          esc(n.ctime),
+          `<span class="ob-mono">${esc(n.ctime)}</span>`,
         ]),
-        "현재 `0. Inbox/`에 미분류 메모가 없습니다. 상단 빠른 수집함에서 새 메모나 생각을 바로 추가할 수 있습니다."
+        "0. Inbox/ 에 미분류 메모가 없습니다. 상단 QUICK CAPTURE에서 새 생각이나 메모를 즉시 기록할 수 있습니다."
       );
     }
 
@@ -441,13 +462,13 @@
       }
       rows.sort((a, b) => b.mtime.localeCompare(a.mtime));
       return renderBaseTable(
-        `🧠 ${viewName || "자료"} (${rows.length}건)`,
-        ["노트", "분류/단계", "요약", "갱신일"],
+        `ZETTELKASTEN // ${viewName || "자료"} (${rows.length})`,
+        ["NOTE", "STAGE / KIND", "SUMMARY", "UPDATED"],
         rows.map((n) => [
           noteLinkHTML(n.path, n.name),
-          `<span class="badge ${n.props.stage === "영구" ? "badge-green" : n.props.stage === "임시" ? "badge-amber" : "badge-blue"}">${esc(n.props.kind || "자료")}${n.props.stage ? " · " + esc(n.props.stage) : ""}</span>`,
+          `<span class="ob-badge ${n.props.stage === "영구" ? "ob-badge--low" : n.props.stage === "임시" ? "ob-badge--warning" : "ob-badge--info"}">${esc(n.props.kind || "자료")}${n.props.stage ? " · " + esc(n.props.stage) : ""}</span>`,
           esc(n.props.summary || n.body.replace(/^#.*$/gm, "").trim().slice(0, 95)),
-          esc(n.mtime),
+          `<span class="ob-mono">${esc(n.mtime)}</span>`,
         ])
       );
     }
@@ -461,16 +482,18 @@
       } else if (viewName === "관심") rows = pool.filter((n) => n.props.position === "관심");
       rows.sort((a, b) => String(a.props.next_review || "").localeCompare(String(b.props.next_review || "")));
       return renderBaseTable(
-        `📈 종목 · ${viewName || "전체"} (${rows.length}건)`,
-        ["종목 노트", "티커", "섹터", "다음 점검", "핵심 질문 (Question)", "투자 논리 (Thesis)"],
-        rows.map((n) => [
-          noteLinkHTML(n.path, n.name),
-          `<span class="badge badge-blue">${esc(n.props.ticker || "-")}</span>`,
-          esc(n.props.sector || "-"),
-          esc(n.props.next_review || "-"),
-          esc(n.props.question || "-"),
-          esc(n.props.thesis || "-"),
-        ])
+        `CORE HOLDINGS // 종목 · ${viewName || "전체"} (${rows.length})`,
+        ["TICKER / NOTE", "SECTOR", "NEXT REVIEW", "KEY QUESTION", "THESIS"],
+        rows.map((n) => {
+          const tkr = String(n.props.ticker || n.name.split(" ")[0]);
+          return [
+            `<div style="display:flex;align-items:center;gap:10px;"><span class="ob-ticker">${esc(tkr.slice(0, 4))}</span><div>${noteLinkHTML(n.path, n.name)}</div></div>`,
+            esc(n.props.sector || "−"),
+            `<span class="ob-mono">${esc(n.props.next_review || "−")}</span>`,
+            esc(n.props.question || "−"),
+            esc(n.props.thesis || "−"),
+          ];
+        })
       );
     }
 
@@ -485,14 +508,14 @@
       else rows = pool.filter((n) => n.props.done !== true);
       rows.sort((a, b) => String(a.props.do_date || "9999").localeCompare(String(b.props.do_date || "9999")));
       return renderBaseTable(
-        `✅ 할 일 · ${viewName || "진행 중"} (${rows.length}건)`,
-        ["상태", "할 일", "구분", "날짜 (do_date)", "시각", "박스/프로젝트"],
+        `TASKS // 할 일 · ${viewName || "ACTIVE"} (${rows.length})`,
+        ["DONE", "TASK", "TYPE", "DO DATE", "TIME", "BOX / PROJECT"],
         rows.map((n) => [
           `<input type="checkbox" class="task-toggle" data-path="${esc(n.path)}" ${n.props.done === true ? "checked" : ""} title="완료 상태 토글" />`,
           noteLinkHTML(n.path, n.name),
-          `<span class="badge">${esc(n.props.type || "일반")}</span>`,
-          esc(n.props.do_date || "-"),
-          esc(n.props.planned_time || "-"),
+          `<span class="ob-badge">${esc(n.props.type || "일반")}</span>`,
+          `<span class="ob-mono">${esc(n.props.do_date || "−")}</span>`,
+          `<span class="ob-mono">${esc(n.props.planned_time || "−")}</span>`,
           formatPropVal(n.props.box || n.props.project),
         ])
       );
@@ -509,38 +532,38 @@
       if (viewName === "매매 기록") {
         const trades = linked.filter((n) => n.props.kind === "매매일지");
         return renderBaseTable(
-          `📝 연결된 매매 기록 (${trades.length}건)`,
-          ["일자", "노트", "매매", "근거"],
-          trades.map((n) => [esc(n.props.trade_date || n.ctime), noteLinkHTML(n.path, n.name), esc(n.props.side || "-"), esc(n.props.reason || "-")])
+          `TRADES // 연결된 매매 기록 (${trades.length})`,
+          ["DATE", "NOTE", "SIDE", "REASON"],
+          trades.map((n) => [`<span class="ob-mono">${esc(n.props.trade_date || n.ctime)}</span>`, noteLinkHTML(n.path, n.name), esc(n.props.side || "−"), esc(n.props.reason || "−")])
         );
       }
       return renderBaseTable(
-        `🔗 연결된 자료 · 위키 (${linked.length}건)`,
-        ["노트", "폴더", "분류", "요약"],
+        `BACKLINKS & CONTEXT // 연결된 자료 · 위키 (${linked.length})`,
+        ["NOTE", "FOLDER", "TYPE", "SUMMARY"],
         linked.slice(0, 25).map((n) => [
           noteLinkHTML(n.path, n.name),
-          `<span class="badge">${esc(n.top_folder)}</span>`,
-          esc(n.props.kind || n.props.wiki_type || "-"),
+          `<span class="ob-badge">${esc(n.top_folder)}</span>`,
+          esc(n.props.kind || n.props.wiki_type || "−"),
           esc(n.props.summary || n.body.replace(/^#.*$/gm, "").trim().slice(0, 90)),
         ])
       );
     }
 
-    return `<div class="callout callout-info"><div class="callout-title">📊 데이터베이스 뷰: ${esc(baseSpec)}</div></div>`;
+    return `<div class="callout"><div class="callout-title">DATABASE VIEW // ${esc(baseSpec)}</div></div>`;
   }
 
-  function renderBaseTable(title, headers, rows, emptyMsg = "해당 조건의 항목이 없습니다.") {
+  function renderBaseTable(title, headers, rows, emptyMsg = "NO RECORDS IN THIS VIEW.") {
     if (!rows.length) {
-      return `<div class="panel" style="margin:12px 0;padding:12px 14px;">
-        <div style="font-weight:700;font-size:13.5px;margin-bottom:4px;">${esc(title)}</div>
-        <div style="color:var(--text-muted);font-size:12.8px;">${esc(emptyMsg)}</div>
+      return `<div class="ob-card">
+        <div class="ob-card__head"><span>${esc(title)}</span><span class="ob-badge">0</span></div>
+        <div class="ob-card__body" style="color:var(--muted);font-size:13px;">${esc(emptyMsg)}</div>
       </div>`;
     }
     const ths = headers.map((h) => `<th>${esc(h)}</th>`).join("");
     const trs = rows.map((r) => `<tr>${r.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("");
-    return `<div class="panel" style="margin:12px 0;padding:12px 14px;">
-      <div style="font-weight:700;font-size:13.5px;margin-bottom:8px;">${esc(title)}</div>
-      <div class="table-wrap"><table class="data-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>
+    return `<div class="ob-card">
+      <div class="ob-card__head"><span>${esc(title)}</span><span class="ob-badge">${rows.length}</span></div>
+      <div class="table-wrap"><table class="ob-table ob-table--striped"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>
     </div>`;
   }
 
@@ -555,13 +578,13 @@
 
   function formatSingleProp(val) {
     const s = String(val ?? "");
-    if (!s) return "-";
+    if (!s) return "−";
     const m = s.match(/^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/);
     if (m) {
       const target = resolveNoteLink(m[1]);
       const label = m[2] || m[1];
       if (target) return noteLinkHTML(target.path, label);
-      return `<span class="badge">${esc(label)}</span>`;
+      return `<span class="ob-badge">${esc(label)}</span>`;
     }
     return esc(s);
   }
@@ -575,7 +598,6 @@
     while (i < lines.length) {
       const line = lines[i];
 
-      // 1. Fenced code block
       if (line.trim().startsWith("```")) {
         const codeLines = [];
         i++;
@@ -588,7 +610,6 @@
         continue;
       }
 
-      // 2. Embedded .base or note transclusion ![[...]]
       const embedM = line.trim().match(/^!\[\[([^\]]+)\]\]$/);
       if (embedM) {
         const spec = embedM[1];
@@ -597,9 +618,9 @@
         } else {
           const target = resolveNoteLink(spec);
           if (target) {
-            out.push(`<div class="callout callout-info">
-              <div class="callout-title">📄 임베드 노트: ${noteLinkHTML(target.path, target.name)}</div>
-              <div style="font-size:13px;color:var(--text-muted);">${esc(target.props.summary || target.body.slice(0, 180))}</div>
+            out.push(`<div class="callout">
+              <div class="callout-title">EMBED // ${noteLinkHTML(target.path, target.name)}</div>
+              <div style="font-size:13px;color:var(--muted);">${esc(target.props.summary || target.body.slice(0, 180))}</div>
             </div>`);
           }
         }
@@ -607,7 +628,6 @@
         continue;
       }
 
-      // 3. Callouts or Blockquotes (> [!tip] or > text)
       if (line.trim().startsWith(">")) {
         const bqLines = [];
         while (i < lines.length && lines[i].trim().startsWith(">")) {
@@ -630,7 +650,6 @@
         continue;
       }
 
-      // 4. Markdown Table
       if (line.includes("|") && i + 1 < lines.length && /^\s*\|?[\s\-:|]+\|[\s\-:|]*$/.test(lines[i + 1])) {
         const parseRow = (r) =>
           r
@@ -638,7 +657,7 @@
             .replace(/^\|/, "")
             .replace(/\|$/, "")
             .split(/(?<!\\)\|/)
-            .map((c) => inlineFormat(c.replace(/\\\|/g, "|").trim()));
+            .map((c) => colorizeNumbersInHtml(inlineFormat(c.replace(/\\\|/g, "|").trim())));
         const headers = parseRow(line);
         i += 2;
         const rows = [];
@@ -647,7 +666,7 @@
           i++;
         }
         out.push(
-          `<div class="table-wrap" style="margin:12px 0;"><table class="data-table"><thead><tr>${headers
+          `<div class="table-wrap" style="margin:14px 0;"><table class="ob-table ob-table--striped"><thead><tr>${headers
             .map((h) => `<th>${h}</th>`)
             .join("")}</tr></thead><tbody>${rows
             .map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`)
@@ -656,41 +675,42 @@
         continue;
       }
 
-      // 5. Headings
       const hM = line.match(/^(#{1,4})\s+(.*)$/);
       if (hM) {
         const lvl = hM[1].length;
-        out.push(`<h${lvl}>${inlineFormat(hM[2])}</h${lvl}>`);
+        const headingText = hM[2];
+        const isAiHeading = headingText.includes("AI 확장") || headingText.includes("외부 분석");
+        out.push(
+          `<h${lvl}>${inlineFormat(headingText)} ${
+            isAiHeading ? '<span class="ob-badge ob-badge--ai" style="margin-left:8px;">AI</span>' : ""
+          }</h${lvl}>`
+        );
         i++;
         continue;
       }
 
-      // 6. Horizontal rule
       if (/^---+$/.test(line.trim())) {
-        out.push("<hr style='border:none;border-top:1px solid var(--border-subtle);margin:18px 0;'/>");
+        out.push("<hr style='border:none;border-top:3px solid var(--frame);margin:20px 0;'/>");
         i++;
         continue;
       }
 
-      // 7. Lists
       if (/^\s*([-*•]|\d+\.)\s+/.test(line)) {
         const items = [];
         while (i < lines.length && /^\s*([-*•]|\d+\.)\s+/.test(lines[i])) {
           items.push(lines[i].replace(/^\s*([-*•]|\d+\.)\s+/, ""));
           i++;
         }
-        out.push(`<ul>${items.map((it) => `<li>${inlineFormat(it)}</li>`).join("")}</ul>`);
+        out.push(`<ul>${items.map((it) => `<li>${colorizeNumbersInHtml(inlineFormat(it))}</li>`).join("")}</ul>`);
         continue;
       }
 
-      // 8. Blank line
       if (!line.trim()) {
         i++;
         continue;
       }
 
-      // 9. Paragraph
-      out.push(`<p>${inlineFormat(line)}</p>`);
+      out.push(`<p>${colorizeNumbersInHtml(inlineFormat(line))}</p>`);
       i++;
     }
 
@@ -699,13 +719,9 @@
 
   function inlineFormat(text) {
     let s = esc(text);
-    // Unescape \$ in prose
     s = s.replace(/\\\$/g, "$");
-    // Inline code
     s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
-    // Bold & Italic
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    // WikiLinks [[Target|Label]] or [[Target#Heading|Label]]
     s = s.replace(/\[\[([^\]]+)\]\]/g, (_, inner) => {
       const unescaped = inner.replace(/\\\|/g, "|");
       const [targetPart, aliasPart] = unescaped.split("|");
@@ -717,7 +733,6 @@
       }
       return `<a class="wikilink" data-search-query="${esc(cleanName)}">${label}</a>`;
     });
-    // External Markdown links [label](url)
     s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="wikilink">$1 ↗</a>');
     return s;
   }
@@ -740,62 +755,77 @@
     const openTasks = state.notes.filter((n) => (n.top_folder === "5. Tasks" || n.props.entity === "할일") && n.props.done !== true).length;
 
     container.innerHTML = `
-      <div class="stat-card" data-jump-tab="explorer">
-        <div class="stat-label">전체 볼트 노트</div>
-        <div class="stat-value">${state.notes.length}</div>
-        <div class="stat-sub">10개 폴더 전체 동기화</div>
+      <div class="ob-stat" data-jump-tab="explorer">
+        <span class="ob-stat__label">VAULT NOTES // 전체 노트</span>
+        <span class="ob-stat__value">${state.notes.length}</span>
+        <span class="ob-stat__sub">10 FOLDERS · PRIVATE SYNC</span>
       </div>
-      <div class="stat-card" data-jump-tab="thoughts" data-thought-filter="all">
-        <div class="stat-label">내 생각 · 영구 · 참고</div>
-        <div class="stat-value">${thoughts.length + refs.length}</div>
-        <div class="stat-sub">영구 ${permThoughts.length} · 다듬을 생각 ${tempThoughts.length} · 참고 ${refs.length}</div>
+      <div class="ob-stat" data-jump-tab="thoughts" data-thought-filter="all">
+        <span class="ob-stat__label">ZETTELKASTEN // 생각·영구·참고</span>
+        <span class="ob-stat__value">${thoughts.length + refs.length}</span>
+        <span class="ob-stat__sub">PERM ${permThoughts.length} · TEMP ${tempThoughts.length} · REF ${refs.length}</span>
       </div>
-      <div class="stat-card" data-jump-tab="investing" data-inv-sub="stocks">
-        <div class="stat-label">핵심 보유 종목</div>
-        <div class="stat-value">${stocks.length}</div>
-        <div class="stat-sub">NVDA · AVGO · MRVL · GOOGL · ANT · SPCX</div>
+      <div class="ob-stat" data-jump-tab="investing" data-inv-sub="stocks">
+        <span class="ob-stat__label">CORE HOLDINGS // 핵심 보유 종목</span>
+        <span class="ob-stat__value">${stocks.length}</span>
+        <span class="ob-stat__sub">NVDA · AVGO · MRVL · GOOGL · ANT · SPCX</span>
       </div>
-      <div class="stat-card" data-jump-tab="investing" data-inv-sub="wiki">
-        <div class="stat-label">LLM 위키 &amp; 어닝콜</div>
-        <div class="stat-value">${wikiCount}</div>
-        <div class="stat-sub">48개 어닝콜/행사 · 74개 SEC 공시</div>
+      <div class="ob-stat" data-jump-tab="investing" data-inv-sub="wiki">
+        <span class="ob-stat__label">LLM WIKI &amp; CALLS // 위키·어닝콜</span>
+        <span class="ob-stat__value">${wikiCount}</span>
+        <span class="ob-stat__sub">48 CALLS/EVENTS · 75 SEC FILINGS</span>
       </div>
-      <div class="stat-card" data-jump-tab="triage">
-        <div class="stat-label">진행 중 할 일 · 일정</div>
-        <div class="stat-value">${openTasks}</div>
-        <div class="stat-sub">위키 대기 클리핑 ${pendingClippings}건</div>
+      <div class="ob-stat" data-jump-tab="triage">
+        <span class="ob-stat__label">ACTIVE TASKS // 할 일 · 대기 클립</span>
+        <span class="ob-stat__value">${openTasks}</span>
+        <span class="ob-stat__sub">INGEST PENDING: ${pendingClippings} CLIPS</span>
       </div>
     `;
   }
 
   function renderLockedView() {
-    const hasEncrypted = Boolean(localStorage.getItem(STORAGE_KEYS.tokenEnc));
+    const localEnc = localStorage.getItem(STORAGE_KEYS.tokenEnc);
+    const hasAnyEnc = Boolean(localEnc || state.cloudVaultEnc);
     return `
-      <div class="panel" style="max-width:560px;margin:40px auto;padding:28px;">
-        <div class="panel-header">
-          <h2 class="panel-title">🔐 비공개 시그마 OS 볼트 잠금 해제</h2>
-          <span class="badge badge-blue">100% 비공개</span>
+      <div class="ob-card ob-card--elevated" style="max-width:620px;margin:32px auto;">
+        <div class="ob-card__head">
+          <span>PRIVATE VAULT LOCK // 비공개 시그마 OS 인증</span>
+          <span class="ob-badge ob-badge--yellow">ZERO DATA EXPOSED</span>
         </div>
-        <p style="color:var(--text-muted);font-size:13.5px;margin-bottom:16px;">
-          이 웹앱은 외부에 노트 원문을 단 한 글자도 공개하지 않습니다. 본인 인증 후 비공개 저장소(<code>${esc(state.repo)}</code>)에서 직접 노트를 불러오고 수집함에 기록합니다.
-        </p>
-        ${
-          hasEncrypted
-            ? `<div style="margin-bottom:18px;padding:14px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);">
-                <label style="font-weight:700;font-size:13px;display:block;margin-bottom:6px;">🔑 저장된 간편 비밀번호로 잠금 해제</label>
-                <div class="form-row" style="margin-bottom:0;">
-                  <input type="password" id="unlock-pin-input" class="input" placeholder="설정한 간편 비밀번호 입력" style="flex:1;" />
-                  <button class="btn btn-primary" id="btn-unlock-pin">잠금 해제</button>
-                </div>
-              </div>`
-            : ""
-        }
-        <div>
-          <label style="font-weight:700;font-size:13px;display:block;margin-bottom:6px;">GitHub Personal Access Token (PAT) 입력</label>
-          <input type="password" id="auth-pat-direct" class="input" placeholder="ghp_... 또는 github_pat_... (repo 및 workflow 권한)" style="margin-bottom:10px;" />
-          <label style="font-weight:600;font-size:12.5px;color:var(--text-muted);display:block;margin-bottom:6px;">선택: 다음부터 폰/PC에서 쉽게 열기 위한 간편 비밀번호 설정 (AES-256 암호화 저장)</label>
-          <input type="password" id="auth-pin-setup" class="input" placeholder="간편 비밀번호 설정 (예: 나만의 4~20자리 암호, 비워두면 현재 기기에 바로 유지)" style="margin-bottom:12px;" />
-          <button class="btn btn-primary" id="btn-save-pat-direct" style="width:100%;justify-content:center;padding:10px;">🔒 비공개 볼트 연결 및 열기</button>
+        <div class="ob-card__body">
+          <p style="color:var(--muted);margin-bottom:18px;">
+            <strong>들어갈 때마다 PAT 토큰을 입력할 필요가 없습니다.</strong><br/>
+            한 번만 연결해두면 이 기기(브라우저)에 자동 저장되어 <strong>다음부터는 주소만 열면 0.5초 만에 바로 볼트로 들어갑니다.</strong> 또한 나만의 간편 비밀번호로 클라우드 금고를 저장해두면 스마트폰이나 다른 PC에서도 긴 토큰 없이 비밀번호 한 줄로 즉시 연결됩니다.
+          </p>
+          ${
+            hasAnyEnc
+              ? `<div class="ob-block ob-tone-kelp" style="padding:18px;margin-bottom:20px;">
+                  <div style="font-family:var(--font-display);font-size:13px;text-transform:uppercase;margin-bottom:8px;">
+                    UNLOCK WITH PASSWORD // 간편 비밀번호로 즉시 입장 ${state.cloudVaultEnc ? "(모든 기기 클라우드 금고 활성)" : ""}
+                  </div>
+                  <div class="form-row" style="margin-bottom:8px;">
+                    <input type="password" id="unlock-pin-input" class="input" placeholder="설정한 간편 비밀번호 입력" style="flex:1;" />
+                    <button class="ob-btn ob-btn--primary" id="btn-unlock-pin">UNLOCK →</button>
+                  </div>
+                  <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;">
+                    <input type="checkbox" id="unlock-remember-device" class="task-toggle" checked />
+                    <span>이 기기에서 자동 로그인 유지 (다음부터 비밀번호 입력 없이 바로 열림)</span>
+                  </label>
+                </div>`
+              : ""
+          }
+          <div style="border-top:3px solid var(--frame);padding-top:16px;">
+            <div style="font-family:var(--font-display);font-size:13px;text-transform:uppercase;margin-bottom:8px;">
+              INITIAL SETUP // 최초 1회 GITHUB PAT 토큰 등록
+            </div>
+            <input type="password" id="auth-pat-direct" class="input" placeholder="github_pat_... 또는 ghp_..." style="margin-bottom:10px;" />
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:12px;cursor:pointer;">
+              <input type="checkbox" id="auth-remember-direct" class="task-toggle" checked />
+              <span><strong>이 기기에서 자동 로그인 유지</strong> (다음부터 토큰/비밀번호 입력 없이 접속 즉시 열림)</span>
+            </label>
+            <input type="password" id="auth-pin-setup" class="input" placeholder="선택: 스마트폰/다른 PC에서도 쓸 간편 비밀번호 (AES-256 암호화)" style="margin-bottom:14px;" />
+            <button class="ob-btn ob-btn--primary" id="btn-save-pat-direct" style="width:100%;">CONNECT PRIVATE VAULT →</button>
+          </div>
         </div>
       </div>
     `;
@@ -809,30 +839,32 @@
 
     return `
       <!-- Quick Inbox Capture Bar -->
-      <div class="panel">
-        <div class="panel-header">
-          <h2 class="panel-title">⚡ 빠른 시그마 수집함 (생각 · 메모 · 할 일 즉시 기록)</h2>
+      <div class="ob-card ob-card--elevated">
+        <div class="ob-card__head">
+          <span>QUICK CAPTURE // 빠른 시그마 수집함 (생각 · 참고 · 할 일 즉시 커밋)</span>
           <div style="display:flex;gap:8px;align-items:center;">
-            ${latestDaily ? `<button class="btn btn-sm" data-note-path="${esc(latestDaily.path)}">📅 최신 데일리 (${esc(latestDaily.name)})</button>` : ""}
-            <a href="https://sigma-inbox.emeraldtuna8.chatgpt.site" target="_blank" rel="noopener" class="btn btn-sm">ChatGPT 수집함 ↗</a>
+            ${latestDaily ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(latestDaily.path)}">DAILY: ${esc(latestDaily.name)}</button>` : ""}
+            <a href="https://sigma-inbox.emeraldtuna8.chatgpt.site" target="_blank" rel="noopener" class="ob-btn ob-btn--xs">CHATGPT INBOX ↗</a>
           </div>
         </div>
-        <div class="form-row">
-          <select id="quick-kind" class="select" style="flex:0 0 190px;">
-            <option value="thought_temp">🧠 임시 생각 (다듬을 생각)</option>
-            <option value="thought_perm">💎 영구 생각 노트</option>
-            <option value="reference">📌 참고 노트 (반응·인용)</option>
-            <option value="task">✅ 할 일 / 일정</option>
-            <option value="inbox">📥 일반 미분류 메모 (0. Inbox)</option>
-          </select>
-          <input type="text" id="quick-title" class="input" placeholder="제목 (예: 광 인터커넥트 병목에서 Marvell-Lumentum 합병의 의미)" style="flex:1;min-width:220px;" />
-        </div>
-        <textarea id="quick-body" class="textarea" style="min-height:82px;margin-bottom:10px;" placeholder="떠오른 생각, 원문 메모, 또는 할 일을 적으세요. 생각 노트는 ## 원래 메모에 원형 그대로 보존됩니다."></textarea>
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-          <span style="font-size:12px;color:var(--text-muted);">저장 즉시 GitHub 비공개 볼트(<code>${esc(state.repo)}</code>)의 해당 폴더에 마크다운 노트로 커밋됩니다.</span>
-          <div style="display:flex;gap:8px;">
-            <button class="btn" id="btn-go-full-inbox">📥 상세 수집함 · MD 클리핑 업로드 열기</button>
-            <button class="btn btn-primary" id="btn-quick-save">💾 볼트에 즉시 저장</button>
+        <div class="ob-card__body">
+          <div class="form-row">
+            <select id="quick-kind" class="select" style="flex:0 0 220px;">
+              <option value="thought_temp">TEMP THOUGHT // 임시 생각</option>
+              <option value="thought_perm">PERM THOUGHT // 영구 생각</option>
+              <option value="reference">REFERENCE // 참고 노트</option>
+              <option value="task">TASK // 할 일 · 일정</option>
+              <option value="inbox">RAW INBOX // 0. Inbox 메모</option>
+            </select>
+            <input type="text" id="quick-title" class="input" placeholder="TITLE // 노트 제목 (예: 광 인터커넥트 병목에서 Marvell-Lumentum 합병의 의미)" style="flex:1;min-width:220px;" />
+          </div>
+          <textarea id="quick-body" class="textarea" style="min-height:84px;margin-bottom:12px;" placeholder="떠오른 생각, 원문 메모, 또는 할 일을 입력하십시오. 생각 노트는 ## 원래 메모 섹션에 원형 그대로 보존됩니다."></textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <span class="ob-mono" style="font-size:12px;color:var(--muted);">DIRECT COMMIT TO: ${esc(state.repo)} (MAIN)</span>
+            <div style="display:flex;gap:10px;">
+              <button class="ob-btn ob-btn--sm" id="btn-go-full-inbox">FULL INBOX / MD UPLOAD →</button>
+              <button class="ob-btn ob-btn--primary" id="btn-quick-save">COMMIT TO VAULT +</button>
+            </div>
           </div>
         </div>
       </div>
@@ -856,92 +888,89 @@
   function renderInboxView() {
     return `
       <div class="grid-2">
-        <div class="panel">
-          <div class="panel-header">
-            <h2 class="panel-title">📥 시그마 수집함 · 새 노트 직접 작성</h2>
-            <span class="badge badge-blue">GitHub 볼트 직결</span>
+        <div class="ob-card ob-card--elevated">
+          <div class="ob-card__head">
+            <span>SIGMA INBOX // 새 노트 · 생각 · 할 일 작성</span>
+            <span class="ob-badge ob-badge--yellow">DIRECT COMMIT</span>
           </div>
-          <div class="form-row">
-            <div style="flex:1;min-width:160px;">
-              <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">기록 종류</label>
-              <select id="inbox-kind" class="select">
-                <option value="thought_temp">🧠 생각 노트 (임시 · 다듬을 생각)</option>
-                <option value="thought_perm">💎 생각 노트 (영구 · 주장+AI확장 틀)</option>
-                <option value="reference">📌 참고 노트 (책·영상·기사 대목과 내 반응)</option>
-                <option value="task">✅ 할 일 (5. Tasks)</option>
-                <option value="schedule">📅 일정 (5. Tasks · type: 일정)</option>
-                <option value="inbox">📥 미분류 수집함 메모 (0. Inbox)</option>
-              </select>
+          <div class="ob-card__body">
+            <div class="form-row">
+              <div style="flex:1;min-width:160px;">
+                <label class="label" style="display:block;margin-bottom:4px;">RECORD TYPE</label>
+                <select id="inbox-kind" class="select">
+                  <option value="thought_temp">생각 노트 (임시 · 다듬을 생각)</option>
+                  <option value="thought_perm">생각 노트 (영구 · 주장+AI확장 틀)</option>
+                  <option value="reference">참고 노트 (책·영상·기사 대목과 반응)</option>
+                  <option value="task">할 일 (5. Tasks)</option>
+                  <option value="schedule">일정 (5. Tasks · type: 일정)</option>
+                  <option value="inbox">미분류 수집함 메모 (0. Inbox)</option>
+                </select>
+              </div>
+              <div style="flex:1;min-width:130px;">
+                <label class="label" style="display:block;margin-bottom:4px;">IMPORTANCE</label>
+                <select id="inbox-importance" class="select">
+                  <option value="일반">일반 (NORMAL)</option>
+                  <option value="중요">중요 (HIGH)</option>
+                </select>
+              </div>
+              <div style="flex:1;min-width:150px;">
+                <label class="label" style="display:block;margin-bottom:4px;">DATE</label>
+                <input type="date" id="inbox-date" class="input" value="${todayStr()}" />
+              </div>
             </div>
-            <div style="flex:1;min-width:140px;">
-              <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">중요도 / 우선순위</label>
-              <select id="inbox-importance" class="select">
-                <option value="일반">일반</option>
-                <option value="중요">중요</option>
-              </select>
-            </div>
-            <div style="flex:1;min-width:150px;">
-              <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">관련 날짜 / 실행일 (선택)</label>
-              <input type="date" id="inbox-date" class="input" value="${todayStr()}" />
-            </div>
-          </div>
 
-          <div class="form-row">
-            <div style="flex:2;min-width:220px;">
-              <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">노트 제목 (파일명)</label>
-              <input type="text" id="inbox-title" class="input" placeholder="제목을 입력하세요" />
+            <div class="form-row">
+              <div style="flex:2;min-width:220px;">
+                <label class="label" style="display:block;margin-bottom:4px;">NOTE TITLE</label>
+                <input type="text" id="inbox-title" class="input" placeholder="노트 제목 (파일명)" />
+              </div>
+              <div style="flex:1;min-width:160px;">
+                <label class="label" style="display:block;margin-bottom:4px;">SOURCE / AUTHOR</label>
+                <input type="text" id="inbox-source" class="input" placeholder="출처 또는 저자" />
+              </div>
             </div>
-            <div style="flex:1;min-width:160px;">
-              <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">출처 / 저자 (참고·생각 선택)</label>
-              <input type="text" id="inbox-source" class="input" placeholder="예: 시그마 웹 수집함 / 기사 URL" />
+
+            <div style="margin-bottom:12px;">
+              <label class="label" style="display:block;margin-bottom:4px;">ONE-LINE SUMMARY</label>
+              <input type="text" id="inbox-summary" class="input" placeholder="표 뷰에 표시될 한 줄 요약 (선택)" />
             </div>
-          </div>
 
-          <div style="margin-bottom:10px;">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">한 줄 요약 (summary 속성 · 선택)</label>
-            <input type="text" id="inbox-summary" class="input" placeholder="핵심 요약을 한 줄로 적으면 표 뷰에서 바로 보입니다" />
-          </div>
+            <div style="margin-bottom:16px;">
+              <label class="label" style="display:block;margin-bottom:4px;">ORIGINAL MEMO // 내 원문 메모 (원형 보존)</label>
+              <textarea id="inbox-body" class="textarea" style="min-height:180px;" placeholder="내 생각이나 메모 원문을 작성하십시오."></textarea>
+            </div>
 
-          <div style="margin-bottom:12px;">
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">본문 / 내 원래 메모 (원형 보존)</label>
-            <textarea id="inbox-body" class="textarea" style="min-height:180px;" placeholder="내 생각이나 메모 원문을 자유롭게 작성하세요."></textarea>
+            <button class="ob-btn ob-btn--primary" id="btn-inbox-submit" style="width:100%;">COMMIT NOTE TO PRIVATE VAULT +</button>
           </div>
-
-          <button class="btn btn-primary" id="btn-inbox-submit" style="width:100%;justify-content:center;padding:10px;">💾 비공개 볼트에 노트 생성 및 커밋</button>
         </div>
 
         <div>
-          <!-- MD Clipping Upload Panel -->
-          <div class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">📎 웹 클리핑 MD 파일 업로드 (원본 바이트 보존)</h2>
-              <span class="badge badge-green">Clippings/</span>
+          <div class="ob-card">
+            <div class="ob-card__head">
+              <span>MD CLIPPING UPLOAD // 웹 클리핑 원본 업로드</span>
+              <span class="ob-badge ob-badge--low">BYTE-PRESERVED</span>
             </div>
-            <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
-              Obsidian Web Clipper 등으로 저장한 <code>.md</code> 파일(어닝콜 트랜스크립트, 유튜브 자막, 기사 등)을 선택하면 원본 바이트 그대로 <code>Clippings/</code> 폴더에 업로드합니다.
-            </p>
-            <input type="file" id="clipping-file-input" accept=".md,text/markdown" multiple class="input" style="margin-bottom:10px;" />
-            <button class="btn btn-primary" id="btn-upload-clippings" style="width:100%;justify-content:center;">📤 선택한 MD 클리핑 볼트에 업로드</button>
+            <div class="ob-card__body">
+              <p style="color:var(--muted);margin-bottom:12px;">
+                어닝콜 트랜스크립트, 유튜브 자막, 기사 등 <code>.md</code> 클리핑 파일을 원본 바이트 그대로 <code>Clippings/</code> 폴더에 업로드합니다.
+              </p>
+              <input type="file" id="clipping-file-input" accept=".md,text/markdown" multiple class="input" style="margin-bottom:12px;" />
+              <button class="ob-btn" id="btn-upload-clippings" style="width:100%;">UPLOAD .MD TO CLIPPINGS/ ↗</button>
+            </div>
           </div>
 
-          <!-- GitHub Actions Trigger Panel -->
-          <div class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">⚙️ 시그마 OS 자동화 워크플로 즉시 실행</h2>
-              <span class="badge badge-teal">GitHub Actions</span>
+          <div class="ob-block ob-tone-peach" style="padding:24px;">
+            <div style="font-family:var(--font-display);font-size:16px;text-transform:uppercase;margin-bottom:8px;">
+              WORKFLOW DISPATCH // 시그마 OS 자동화 즉시 실행
             </div>
-            <p style="font-size:12.8px;color:var(--text-muted);margin-bottom:12px;">
-              정기 스케줄(06:15 수집함 · 07:00 매크로 · 07:30 IR · 08:00 SEC)을 기다리지 않고 지금 바로 GitHub Actions를 실행합니다.
+            <p style="font-size:13px;margin-bottom:14px;">
+              아침 정기 스케줄(06:15 수집함 · 07:00 매크로 · 07:30 IR · 08:00 SEC)을 기다리지 않고 GitHub Actions를 즉시 가동합니다.
             </p>
-            <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:8px;">
-              <button class="btn" data-Run-workflow="sigma-inbox-sync.yml" data-wf-apply="true">🔄 수집함 동기화 실행</button>
-              <button class="btn" data-Run-workflow="sigma-macro-sync.yml">📊 FRED 매크로 갱신</button>
-              <button class="btn" data-Run-workflow="sigma-ir-sync.yml">📰 6종목 공식 IR 갱신</button>
-              <button class="btn" data-Run-workflow="sigma-sec-wiki.yml">🏛️ SEC 공시 동기화</button>
-            </div>
-            <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-size:12px;color:var(--text-muted);">기존 ChatGPT 상담 수집함 사이트가 필요할 때:</span>
-              <a href="https://sigma-inbox.emeraldtuna8.chatgpt.site" target="_blank" rel="noopener" class="btn btn-sm">ChatGPT 수집함 열기 ↗</a>
+            <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:10px;">
+              <button class="ob-btn ob-btn--sm" data-Run-workflow="sigma-inbox-sync.yml" data-wf-apply="true">RUN INBOX SYNC ↗</button>
+              <button class="ob-btn ob-btn--sm" data-Run-workflow="sigma-macro-sync.yml">RUN FRED MACRO ↗</button>
+              <button class="ob-btn ob-btn--sm" data-Run-workflow="sigma-ir-sync.yml">RUN 6-STOCK IR ↗</button>
+              <button class="ob-btn ob-btn--sm" data-Run-workflow="sigma-sec-wiki.yml">RUN SEC EDGAR ↗</button>
             </div>
           </div>
         </div>
@@ -971,29 +1000,31 @@
       .map((n) => {
         const isPerm = n.props.stage === "영구";
         const isTemp = n.props.kind === "생각" && !isPerm;
-        const badgeClass = isPerm ? "badge-green" : isTemp ? "badge-amber" : n.props.kind === "참고" ? "badge-teal" : "badge-blue";
-        const badgeLabel = n.props.kind === "생각" ? `생각 · ${n.props.stage || "임시"}` : n.props.kind || "자료";
+        const badgeClass = isPerm ? "ob-badge--low" : isTemp ? "ob-badge--warning" : "ob-badge--info";
+        const badgeLabel = n.props.kind === "생각" ? `THOUGHT · ${n.props.stage || "임시"}` : n.props.kind || "RESOURCE";
         const hasOriginalMemo = n.body.includes("## 원래 메모");
         const hasAiExpansion = n.body.includes("AI 확장");
-        const preview = n.props.summary || n.body.replace(/^#+\s+.*$/gm, "").trim().slice(0, 160);
+        const preview = n.props.summary || n.body.replace(/^#+\s+.*$/gm, "").trim().slice(0, 165);
 
         return `
-          <div class="thought-card" data-note-path="${esc(n.path)}">
-            <div>
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px;">
-                <span class="badge ${badgeClass}">${esc(badgeLabel)}</span>
-                <span style="font-size:11.5px;color:var(--text-faint);">${esc(n.mtime)}</span>
-              </div>
-              <div style="font-weight:700;font-size:15px;margin-bottom:6px;line-height:1.4;">${esc(n.name)}</div>
-              <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">${esc(preview)}</div>
+          <div class="ob-card" data-note-path="${esc(n.path)}" style="cursor:pointer;margin-bottom:0;display:flex;flex-direction:column;justify-content:space-between;">
+            <div class="ob-card__head">
+              <span class="ob-badge ${badgeClass}">${esc(badgeLabel)}</span>
+              <span class="ob-mono" style="font-size:11.5px;color:var(--muted);">${esc(n.mtime)}</span>
             </div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid var(--border-subtle);">
-              <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                ${hasOriginalMemo ? '<span class="badge" title="사용자 원래 메모 보존됨">✍️ 원문 보존</span>' : ""}
-                ${hasAiExpansion ? '<span class="badge badge-blue" title="AI 근거·반론·연결 확장됨">✨ AI 확장</span>' : ""}
-                ${n.backlinks.length ? `<span class="badge">🔗 백링크 ${n.backlinks.length}</span>` : ""}
+            <div class="ob-card__body" style="flex:1;display:flex;flex-direction:column;justify-content:space-between;">
+              <div>
+                <h3 style="margin:0 0 8px;font-size:17px;line-height:1.35;color:var(--ink);">${esc(n.name)}</h3>
+                <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">${esc(preview)}</p>
               </div>
-              <span style="font-size:12px;color:var(--accent);font-weight:600;">열기 →</span>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between;padding-top:10px;border-top:1px solid var(--hairline);">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  ${hasOriginalMemo ? '<span class="ob-badge">RAW MEMO ✓</span>' : ""}
+                  ${hasAiExpansion ? '<span class="ob-badge ob-badge--ai">AI EXPANDED</span>' : ""}
+                  ${n.backlinks.length ? `<span class="ob-badge">LINKS ${n.backlinks.length}</span>` : ""}
+                </div>
+                <span class="ob-mono" style="font-size:12px;color:var(--ink);font-weight:700;">OPEN →</span>
+              </div>
             </div>
           </div>
         `;
@@ -1001,20 +1032,22 @@
       .join("");
 
     return `
-      <div class="panel">
-        <div class="panel-header">
-          <h2 class="panel-title">🧠 내 생각 · 영구 노트 · 참고 노트 · 공부 자료 (${filtered.length}건)</h2>
-          <button class="btn btn-primary btn-sm" data-jump-tab="inbox">➕ 새 생각 / 참고 노트 작성</button>
+      <div class="ob-card ob-card--elevated">
+        <div class="ob-card__head">
+          <span>ZETTELKASTEN // 생각 노트 · 영구 노트 · 참고 노트 (${filtered.length})</span>
+          <button class="ob-btn ob-btn--primary ob-btn--sm" data-jump-tab="inbox">NEW THOUGHT +</button>
         </div>
-        <div class="subtabs">
-          <button class="btn btn-sm ${state.thoughtFilter === "all" ? "btn-primary" : ""}" data-thought-filter="all">전체 (${allResourceNotes.length})</button>
-          <button class="btn btn-sm ${state.thoughtFilter === "perm" ? "btn-primary" : ""}" data-thought-filter="perm">💎 영구 생각 (${permThoughts.length})</button>
-          <button class="btn btn-sm ${state.thoughtFilter === "temp" ? "btn-primary" : ""}" data-thought-filter="temp">🌱 다듬을 임시 생각 (${tempThoughts.length})</button>
-          <button class="btn btn-sm ${state.thoughtFilter === "ref" ? "btn-primary" : ""}" data-thought-filter="ref">📌 참고 노트 (${refNotes.length})</button>
-          <button class="btn btn-sm ${state.thoughtFilter === "study" ? "btn-primary" : ""}" data-thought-filter="study">📘 투자·매크로 공부 및 기타 자료 (${studyNotes.length})</button>
-          <button class="btn btn-sm" data-note-path="8. System/생각 노트.md">📖 생각 노트 시스템 가이드 열기</button>
+        <div class="ob-card__body">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;">
+            <button class="ob-chip ${state.thoughtFilter === "all" ? "is-active" : ""}" data-thought-filter="all">ALL (${allResourceNotes.length})</button>
+            <button class="ob-chip ${state.thoughtFilter === "perm" ? "is-active" : ""}" data-thought-filter="perm">PERMANENT · 영구 생각 (${permThoughts.length})</button>
+            <button class="ob-chip ${state.thoughtFilter === "temp" ? "is-active" : ""}" data-thought-filter="temp">FLEETING · 다듬을 생각 (${tempThoughts.length})</button>
+            <button class="ob-chip ${state.thoughtFilter === "ref" ? "is-active" : ""}" data-thought-filter="ref">REFERENCE · 참고 노트 (${refNotes.length})</button>
+            <button class="ob-chip ${state.thoughtFilter === "study" ? "is-active" : ""}" data-thought-filter="study">STUDY &amp; DOCS · 공부·상담 자료 (${studyNotes.length})</button>
+            <button class="ob-chip" data-note-path="8. System/생각 노트.md">SYSTEM GUIDE →</button>
+          </div>
+          <div class="grid-3">${cards}</div>
         </div>
-        <div class="grid-3">${cards || "<p style='color:var(--text-muted);'>해당 분류의 노트가 없습니다.</p>"}</div>
       </div>
     `;
   }
@@ -1041,31 +1074,33 @@
 
     const stockCards = stocks
       .map((s) => {
-        const ticker = s.props.ticker || s.name.split(" ")[0];
+        const ticker = String(s.props.ticker || s.name.split(" ")[0]);
         const wikiTarget = resolveNoteLink(s.props.wiki || ticker);
         const callPath = callSourceMap[ticker];
         const eventPath = eventSourceMap[ticker];
         return `
-          <div class="stock-card" data-note-path="${esc(s.path)}">
-            <div>
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span class="badge badge-blue" style="font-size:13px;padding:3px 10px;">${esc(ticker)}</span>
-                  <span style="font-weight:700;font-size:15px;">${esc(s.name)}</span>
-                </div>
-                <span class="badge badge-green">${esc(s.props.position || "보유")}</span>
+          <div class="ob-card" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:space-between;">
+            <div class="ob-card__head">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span class="ob-ticker">${esc(ticker.slice(0, 4))}</span>
+                <span>${esc(s.name)}</span>
               </div>
-              <div style="font-size:12px;color:var(--text-faint);margin-bottom:8px;">
-                섹터: ${esc(s.props.sector || "-")} · 다음 점검일: <strong>${esc(s.props.next_review || "-")}</strong>
-              </div>
-              <div style="font-size:13px;margin-bottom:8px;"><strong>핵심 논리(Thesis):</strong> ${esc(s.props.thesis || "-")}</div>
-              <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px;"><strong>판단 질문:</strong> ${esc(s.props.question || "-")}</div>
+              <span class="ob-badge ob-badge--low">${esc(s.props.position || "HOLDING")}</span>
             </div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:10px;border-top:1px solid var(--border-subtle);">
-              <button class="btn btn-sm btn-primary" data-note-path="${esc(s.path)}">종목 논리 노트</button>
-              ${callPath && state.byPath[callPath] ? `<button class="btn btn-sm" data-note-path="${esc(callPath)}">어닝콜 시계열</button>` : ""}
-              ${eventPath && state.byPath[eventPath] ? `<button class="btn btn-sm" data-note-path="${esc(eventPath)}">대형행사 5칸</button>` : ""}
-              ${wikiTarget ? `<button class="btn btn-sm" data-note-path="${esc(wikiTarget.path)}">위키 엔티티</button>` : ""}
+            <div class="ob-card__body" style="flex:1;display:flex;flex-direction:column;justify-content:space-between;">
+              <div>
+                <div class="ob-mono" style="font-size:12px;color:var(--muted);margin-bottom:10px;">
+                  SECTOR: ${esc(s.props.sector || "−")} // NEXT REVIEW: <strong style="color:var(--ink);">${esc(s.props.next_review || "−")}</strong>
+                </div>
+                <div style="font-size:13.5px;margin-bottom:10px;color:var(--ink);"><strong>THESIS:</strong> ${esc(s.props.thesis || "−")}</div>
+                <div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;"><strong>QUESTION:</strong> ${esc(s.props.question || "−")}</div>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:12px;border-top:1px solid var(--hairline);">
+                <button class="ob-btn ob-btn--xs" data-note-path="${esc(s.path)}">THESIS NOTE →</button>
+                ${callPath && state.byPath[callPath] ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(callPath)}">EARNINGS SERIES</button>` : ""}
+                ${eventPath && state.byPath[eventPath] ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(eventPath)}">EVENT 5-BOX</button>` : ""}
+                ${wikiTarget ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(wikiTarget.path)}">WIKI ENTITY</button>` : ""}
+              </div>
             </div>
           </div>
         `;
@@ -1077,10 +1112,10 @@
 
     if (state.investingSubtab === "stocks") {
       subContent = `
-        <div class="grid-3" style="margin-bottom:18px;">${stockCards}</div>
+        <div class="grid-3" style="margin-bottom:24px;">${stockCards}</div>
         <div class="grid-2">
-          <div>${ renderQuickPreviewPanel("9. Wiki/매크로 스냅샷.md", "📊 FRED 매크로 스냅샷 최신 트리거") }</div>
-          <div>${ renderQuickPreviewPanel("9. Wiki/AI 인프라 신용 점검.md", "🏦 AI 인프라 신용 · 보증 · XPV · FCF 점검") }</div>
+          <div>${renderQuickPreviewPanel("9. Wiki/매크로 스냅샷.md", "FRED MACRO SNAPSHOT // 거시 지표 및 점검 트리거")}</div>
+          <div>${renderQuickPreviewPanel("9. Wiki/AI 인프라 신용 점검.md", "AI INFRA CREDIT // 보증 · XPV · FCF 신용 점검")}</div>
         </div>
       `;
     } else if (state.investingSubtab === "calls") {
@@ -1095,7 +1130,6 @@
       ];
       subContent = `<div class="grid-2">${callPaths.map((p) => renderQuickPreviewPanel(p)).join("")}</div>`;
     } else {
-      // Full LLM Wiki Explorer
       let filteredWiki = wikiNotes;
       if (state.wikiFilter === "entity") filteredWiki = wikiNotes.filter((n) => n.folder === "9. Wiki/Entities");
       else if (state.wikiFilter === "concept") filteredWiki = wikiNotes.filter((n) => n.folder === "9. Wiki/Concepts");
@@ -1104,44 +1138,46 @@
       else if (state.wikiFilter === "sec") filteredWiki = wikiNotes.filter((n) => n.name.startsWith("src-sec-") || n.name === "SEC 공시");
 
       subContent = `
-        <div class="subtabs">
-          <button class="btn btn-sm ${state.wikiFilter === "all" ? "btn-primary" : ""}" data-wiki-filter="all">전체 위키 (${wikiNotes.length})</button>
-          <button class="btn btn-sm ${state.wikiFilter === "synthesis" ? "btn-primary" : ""}" data-wiki-filter="synthesis">종합·매크로·신용·IR</button>
-          <button class="btn btn-sm ${state.wikiFilter === "entity" ? "btn-primary" : ""}" data-wiki-filter="entity">기업·인물 (Entities)</button>
-          <button class="btn btn-sm ${state.wikiFilter === "concept" ? "btn-primary" : ""}" data-wiki-filter="concept">개념 (Concepts)</button>
-          <button class="btn btn-sm ${state.wikiFilter === "source" ? "btn-primary" : ""}" data-wiki-filter="source">일반·어닝콜 출처 (Sources)</button>
-          <button class="btn btn-sm ${state.wikiFilter === "sec" ? "btn-primary" : ""}" data-wiki-filter="sec">SEC 공시 (74)</button>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+          <button class="ob-chip ${state.wikiFilter === "all" ? "is-active" : ""}" data-wiki-filter="all">ALL WIKI (${wikiNotes.length})</button>
+          <button class="ob-chip ${state.wikiFilter === "synthesis" ? "is-active" : ""}" data-wiki-filter="synthesis">SYNTHESES · 종합/매크로/신용/IR</button>
+          <button class="ob-chip ${state.wikiFilter === "entity" ? "is-active" : ""}" data-wiki-filter="entity">ENTITIES · 기업/인물</button>
+          <button class="ob-chip ${state.wikiFilter === "concept" ? "is-active" : ""}" data-wiki-filter="concept">CONCEPTS · 개념</button>
+          <button class="ob-chip ${state.wikiFilter === "source" ? "is-active" : ""}" data-wiki-filter="source">SOURCES · 어닝콜/일반 출처</button>
+          <button class="ob-chip ${state.wikiFilter === "sec" ? "is-active" : ""}" data-wiki-filter="sec">SEC EDGAR (75)</button>
         </div>
         ${renderBaseTable(
-          `📚 LLM 위키 목록 (${filteredWiki.length}건)`,
-          ["위키 페이지", "폴더 / 유형", "신뢰도 / 티커", "최종 갱신"],
+          `LLM WIKI DIRECTORY (${filteredWiki.length})`,
+          ["WIKI PAGE", "TYPE / FOLDER", "TICKER / CREDIBILITY", "UPDATED"],
           filteredWiki.map((n) => [
             noteLinkHTML(n.path, n.name),
-            `<span class="badge">${esc(n.props.wiki_type || n.folder)}</span>`,
-            esc(n.props.ticker || n.props.credibility || "-"),
-            esc(n.mtime),
+            `<span class="ob-badge">${esc(n.props.wiki_type || n.folder)}</span>`,
+            `<span class="ob-mono">${esc(n.props.ticker || n.props.credibility || "−")}</span>`,
+            `<span class="ob-mono">${esc(n.mtime)}</span>`,
           ])
         )}
       `;
     }
 
     return `
-      <div class="panel">
-        <div class="panel-header">
-          <h2 class="panel-title">📈 핵심 보유 6종목 투자 센터 &amp; LLM 위키</h2>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <button class="btn btn-sm" data-note-path="9. Wiki/overview.md">🌐 위키 전체 종합 (overview)</button>
-            <button class="btn btn-sm" data-note-path="9. Wiki/index.md">📑 위키 목차 (index)</button>
-            <button class="btn btn-sm" data-note-path="9. Wiki/공식 보도자료.md">📰 6종목 공식 보도자료</button>
-            <button class="btn btn-sm" data-note-path="9. Wiki/SEC 공시.md">🏛️ SEC 공시</button>
+      <div class="ob-card ob-card--elevated">
+        <div class="ob-card__head">
+          <span>ORDERBLOCK INVESTING &amp; LLM WIKI // 6종목 투자 터미널</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="ob-btn ob-btn--xs" data-note-path="9. Wiki/overview.md">WIKI OVERVIEW</button>
+            <button class="ob-btn ob-btn--xs" data-note-path="9. Wiki/index.md">WIKI INDEX</button>
+            <button class="ob-btn ob-btn--xs" data-note-path="9. Wiki/공식 보도자료.md">OFFICIAL IR</button>
+            <button class="ob-btn ob-btn--xs" data-note-path="9. Wiki/SEC 공시.md">SEC FILINGS</button>
           </div>
         </div>
-        <div class="subtabs">
-          <button class="btn btn-sm ${state.investingSubtab === "stocks" ? "btn-primary" : ""}" data-inv-sub="stocks">핵심 보유 6종목 &amp; 매크로·신용</button>
-          <button class="btn btn-sm ${state.investingSubtab === "calls" ? "btn-primary" : ""}" data-inv-sub="calls">🎙️ 어닝콜 46건 + 대형행사 2건 시계열 종합</button>
-          <button class="btn btn-sm ${state.investingSubtab === "wiki" ? "btn-primary" : ""}" data-inv-sub="wiki">📚 LLM 위키 전체 탐색 (${wikiNotes.length}개)</button>
+        <div class="ob-card__body">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;">
+            <button class="ob-chip ${state.investingSubtab === "stocks" ? "is-active" : ""}" data-inv-sub="stocks">01 // 핵심 보유 6종목 &amp; 매크로·신용</button>
+            <button class="ob-chip ${state.investingSubtab === "calls" ? "is-active" : ""}" data-inv-sub="calls">02 // 어닝콜 46건 + 대형행사 2건 시계열</button>
+            <button class="ob-chip ${state.investingSubtab === "wiki" ? "is-active" : ""}" data-inv-sub="wiki">03 // LLM 위키 전체 탐색 (${wikiNotes.length})</button>
+          </div>
+          ${subContent}
         </div>
-        ${subContent}
       </div>
     `;
   }
@@ -1151,15 +1187,15 @@
     if (!n) return "";
     const rawCount = Array.isArray(n.props.raw) ? n.props.raw.length : 0;
     return `
-      <div class="panel" style="margin-bottom:0;">
-        <div class="panel-header">
-          <h3 class="panel-title" style="font-size:14.5px;">${noteLinkHTML(n.path, customTitle || n.name)}</h3>
-          <div style="display:flex;gap:6px;">
-            ${rawCount ? `<span class="badge badge-blue">원본 ${rawCount}건</span>` : ""}
-            <button class="btn btn-sm" data-note-path="${esc(n.path)}">전체 열기 →</button>
+      <div class="ob-card" style="margin-bottom:0;">
+        <div class="ob-card__head">
+          <span>${noteLinkHTML(n.path, customTitle || n.name)}</span>
+          <div style="display:flex;gap:6px;align-items:center;">
+            ${rawCount ? `<span class="ob-badge ob-badge--info">${rawCount} TRANSCRIPTS</span>` : ""}
+            <button class="ob-btn ob-btn--xs" data-note-path="${esc(n.path)}">OPEN FULL →</button>
           </div>
         </div>
-        <div class="md-body" style="max-height:320px;overflow-y:auto;font-size:13.2px;">
+        <div class="ob-card__body md-body" style="max-height:340px;overflow-y:auto;font-size:13.2px;">
           ${renderMarkdown(n.body.slice(0, 1800), n)}
         </div>
       </div>
@@ -1183,8 +1219,8 @@
         return `
           <div class="folder-group">
             <div class="folder-header" data-toggle-folder="${esc(f)}">
-              <span>${collapsed ? "▸" : "▾"} 📁 ${esc(f)}</span>
-              <span class="badge">${items.length}</span>
+              <span>${collapsed ? "+" : "−"} ${esc(f)}</span>
+              <span class="ob-badge">${items.length}</span>
             </div>
             ${
               collapsed
@@ -1204,7 +1240,7 @@
       .join("");
 
     const note = state.byPath[state.currentNotePath] || state.notes[0];
-    if (!note) return "<div class='panel'>노트를 찾을 수 없습니다.</div>";
+    if (!note) return "<div class='ob-card'><div class='ob-card__body'>NO NOTE FOUND.</div></div>";
 
     const isClipping = note.top_folder === "Clippings";
     const isTempThought = note.props.kind === "생각" && (!note.props.stage || note.props.stage === "임시");
@@ -1217,13 +1253,13 @@
       : "";
 
     const backlinksHtml = note.backlinks && note.backlinks.length
-      ? `<div style="margin-top:28px;padding-top:16px;border-top:1px solid var(--border);">
-          <div style="font-weight:700;font-size:13.5px;margin-bottom:10px;color:var(--text-muted);">🔗 이 노트를 연결한 백링크 (${note.backlinks.length}건)</div>
+      ? `<div style="margin-top:32px;padding-top:16px;border-top:3px solid var(--frame);">
+          <div class="label" style="margin-bottom:10px;color:var(--muted);">BACKLINKS // 이 노트를 인용한 연결 노트 (${note.backlinks.length})</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;">
             ${note.backlinks
               .map((bp) => {
                 const bn = state.byPath[bp];
-                return bn ? `<button class="btn btn-sm" data-note-path="${esc(bn.path)}">📄 ${esc(bn.name)}</button>` : "";
+                return bn ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(bn.path)}">${esc(bn.name)} →</button>` : "";
               })
               .join("")}
           </div>
@@ -1234,20 +1270,20 @@
     if (state.editingNote && !isClipping) {
       const fullRaw = serializeFrontmatterJS(note.props, note.body);
       readerBodyHtml = `
-        <div style="margin-bottom:12px;">
+        <div style="margin-bottom:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <span style="font-size:12.5px;color:var(--text-muted);">마크다운 및 프론트매터 직접 편집 (<code>## 원래 메모</code>는 원형 그대로 보존하세요)</span>
+            <span class="ob-mono" style="font-size:12px;color:var(--muted);">EDIT MARKDOWN &amp; FRONTMATTER (## 원래 메모 보존 원칙 준수)</span>
             ${
               isTempThought
-                ? `<button class="btn btn-sm" id="btn-insert-perm-template">✨ 영구 생각 확장 섹션 틀 자동 삽입</button>`
+                ? `<button class="ob-btn ob-btn--ai ob-btn--xs" id="btn-insert-perm-template">+ 영구 생각 AI 확장 섹션 틀 삽입</button>`
                 : ""
             }
           </div>
           <textarea id="note-editor-textarea" class="textarea" style="min-height:460px;font-family:var(--font-mono);font-size:13px;">${esc(fullRaw)}</textarea>
         </div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;">
-          <button class="btn" id="btn-cancel-edit">취소</button>
-          <button class="btn btn-primary" id="btn-save-edit">💾 GitHub 볼트에 변경사항 커밋</button>
+        <div style="display:flex;justify-content:flex-end;gap:10px;">
+          <button class="ob-btn ob-btn--sm" id="btn-cancel-edit">CANCEL</button>
+          <button class="ob-btn ob-btn--primary ob-btn--sm" id="btn-save-edit">COMMIT CHANGES +</button>
         </div>
       `;
     } else {
@@ -1256,7 +1292,7 @@
         <div class="md-body">${renderMarkdown(note.body, note)}</div>
         ${
           note.truncated
-            ? `<div style="margin-top:14px;"><button class="btn btn-primary" id="btn-load-full-clipping">📖 클리핑 전문 끝까지 불러오기 (${(note.size / 1024).toFixed(1)} KB)</button></div>`
+            ? `<div style="margin-top:18px;"><button class="ob-btn ob-btn--primary" id="btn-load-full-clipping">LOAD FULL TRANSCRIPT (${(note.size / 1024).toFixed(1)} KB) →</button></div>`
             : ""
         }
         ${backlinksHtml}
@@ -1266,9 +1302,9 @@
     return `
       <div class="explorer-layout">
         <aside class="sidebar" aria-label="볼트 폴더 트리">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px 10px;border-bottom:1px solid var(--border-subtle);margin-bottom:8px;">
-            <strong style="font-size:13px;">📂 볼트 폴더 탐색기</strong>
-            <button class="btn btn-sm" id="btn-back-history" ${state.historyStack.length ? "" : "disabled"}>← 이전</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:3px solid var(--frame);margin-bottom:10px;">
+            <span class="label">VAULT TREE</span>
+            <button class="ob-btn ob-btn--xs" id="btn-back-history" ${state.historyStack.length ? "" : "disabled"}>← BACK</button>
           </div>
           ${folderHtml}
         </aside>
@@ -1277,17 +1313,17 @@
           <div class="note-top-meta">
             <div>
               <div class="note-path">${esc(note.path)}</div>
-              <h2 style="margin:4px 0 0;font-size:20px;">${esc(note.name)}</h2>
+              <h2 style="margin:6px 0 0;font-family:var(--font-display);font-size:24px;line-height:30px;color:var(--ink);">${esc(note.name)}</h2>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               ${
                 isClipping
-                  ? `<span class="badge badge-amber" title="CLAUDE.md 규칙에 따라 Clippings 원본은 수정하지 않고 보존합니다">🔒 Clippings 원본 보존 (읽기 전용)</span>`
-                  : `<button class="btn btn-sm ${state.editingNote ? "btn-primary" : ""}" id="btn-toggle-edit">${
-                      state.editingNote ? "👁️ 읽기 모드로" : "✏️ 노트 편집"
+                  ? `<span class="ob-badge ob-badge--warning" title="CLAUDE.md 규칙에 따라 Clippings 원본은 수정하지 않고 보존합니다">RAW CLIPPING · READ ONLY</span>`
+                  : `<button class="ob-btn ob-btn--xs ${state.editingNote ? "ob-btn--primary" : ""}" id="btn-toggle-edit">${
+                      state.editingNote ? "VIEW MODE" : "EDIT NOTE"
                     }</button>`
               }
-              <a href="https://github.com/${esc(state.repo)}/blob/main/${encodeRepoPath(note.path)}" target="_blank" rel="noopener" class="btn btn-sm">GitHub 원문 ↗</a>
+              <a href="https://github.com/${esc(state.repo)}/blob/main/${encodeRepoPath(note.path)}" target="_blank" rel="noopener" class="ob-btn ob-btn--xs">GITHUB ↗</a>
             </div>
           </div>
           ${readerBodyHtml}
@@ -1298,8 +1334,8 @@
 
   function renderAll() {
     renderStatsStrip();
-    document.querySelectorAll(".nav-tab").forEach((btn) => {
-      btn.classList.toggle("active", btn.getAttribute("data-tab") === state.activeTab);
+    document.querySelectorAll(".ob-nav__link").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.getAttribute("data-tab") === state.activeTab);
     });
     const container = document.getElementById("view-container");
     if (!container) return;
@@ -1320,7 +1356,7 @@
   async function openNote(relPath, pushHistory = true) {
     const note = state.byPath[relPath];
     if (!note) {
-      showToast(`노트를 찾을 수 없습니다: ${relPath}`);
+      showToast(`ERROR — Note not found: ${relPath}`);
       return;
     }
     if (pushHistory && state.currentNotePath && state.currentNotePath !== relPath) {
@@ -1331,7 +1367,7 @@
     state.collapsedFolders[note.top_folder] = false;
     state.activeTab = "explorer";
     renderAll();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "auto" });
 
     if (note.truncated) {
       try {
@@ -1414,7 +1450,6 @@
       };
     }
 
-    // default: 0. Inbox
     const props = {
       captured: today,
       source: sourceVal,
@@ -1427,7 +1462,7 @@
 
   async function saveNewInboxNote(kind, title, body, opts = {}) {
     if (!title.trim()) {
-      showToast("제목을 입력해주세요.");
+      showToast("ERROR — 제목을 입력하십시오.");
       return;
     }
     const payload = buildNewNotePayload(kind, title, body, opts);
@@ -1435,11 +1470,11 @@
     renderAll();
 
     if (state.token) {
-      showToast(`GitHub 비공개 볼트에 저장 중: ${payload.path}`);
+      showToast(`COMMITTING: ${payload.path}`);
       await ghPutFile(payload.path, payload.content, `feat(inbox): add ${payload.path} via Sigma OS Web`);
-      showToast(`✅ 비공개 볼트에 커밋 완료: ${payload.path}`);
+      showToast(`OK — COMMITTED: ${payload.path}`);
     } else {
-      showToast(`⚠️ 브라우저 메모리에 반영됨 (GitHub 영구 저장은 상단 [🔒 보안 연결]에 토큰을 입력하세요)`);
+      showToast(`SAVED IN MEMORY — 영구 커밋은 상단 [AUTH ■]에 토큰을 등록하십시오.`);
     }
   }
 
@@ -1459,7 +1494,7 @@
     if (!box) return;
     const q = String(query || "").trim().toLowerCase();
     if (!q) {
-      box.innerHTML = `<div style="color:var(--text-muted);font-size:13px;">검색어를 입력하면 343개 전체 노트 제목·본문·속성·티커에서 즉시 검색합니다.</div>`;
+      box.innerHTML = `<div style="color:var(--muted);font-size:13px;">344개 전체 노트 제목·본문·속성·티커에서 실시간 검색합니다.</div>`;
       return;
     }
     const matches = [];
@@ -1476,7 +1511,7 @@
     matches.sort((a, b) => b.score - a.score || b.note.mtime.localeCompare(a.note.mtime));
     const top = matches.slice(0, 30);
     if (!top.length) {
-      box.innerHTML = `<div style="color:var(--text-muted);font-size:13px;">'${esc(query)}' 검색 결과가 없습니다.</div>`;
+      box.innerHTML = `<div style="color:var(--muted);font-size:13px;">NO RESULTS FOR '${esc(query)}'.</div>`;
       return;
     }
     box.innerHTML = top
@@ -1487,12 +1522,12 @@
             ? note.body.slice(Math.max(0, idx - 45), idx + 110)
             : note.props.summary || note.body.slice(0, 120);
         return `
-          <div class="file-item" data-note-path="${esc(note.path)}" style="padding:10px;border-bottom:1px solid var(--border-subtle);white-space:normal;display:block;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-              <strong style="color:var(--text);font-size:13.8px;">${esc(note.name)}</strong>
-              <span class="badge">${esc(note.top_folder)}</span>
+          <div class="file-item" data-note-path="${esc(note.path)}" style="padding:10px;border-bottom:1px solid var(--hairline);white-space:normal;display:block;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <strong style="color:var(--ink);font-size:14px;">${esc(note.name)}</strong>
+              <span class="ob-badge">${esc(note.top_folder)}</span>
             </div>
-            <div style="font-size:12.2px;color:var(--text-muted);">${esc(snippet.replace(/\s+/g, " "))}</div>
+            <div style="font-size:12.5px;color:var(--muted);">${esc(snippet.replace(/\s+/g, " "))}</div>
           </div>
         `;
       })
@@ -1504,37 +1539,51 @@
     const modal = document.getElementById("auth-modal");
     const body = document.getElementById("auth-modal-body");
     if (!modal || !body) return;
-    const hasEnc = Boolean(localStorage.getItem(STORAGE_KEYS.tokenEnc));
+    const localEnc = localStorage.getItem(STORAGE_KEYS.tokenEnc);
+    const hasAnyEnc = Boolean(localEnc || state.cloudVaultEnc);
+    const autoLoginActive = Boolean(localStorage.getItem(STORAGE_KEYS.tokenPlain));
+
     body.innerHTML = `
-      <p style="font-size:13px;color:var(--text-muted);margin-top:0;">
-        비공개 저장소(<code>${esc(state.repo)}</code>)를 읽고 수집함 메모·노트 편집을 커밋하려면 GitHub Personal Access Token(PAT)이 필요합니다. 토큰은 외부 서버로 전송되지 않고 브라우저에만 보관됩니다.
-      </p>
+      <div class="ob-block ob-tone-kelp" style="padding:16px;margin-bottom:16px;">
+        <div class="label" style="margin-bottom:4px;">AUTO-LOGIN STATUS // 자동 로그인 상태</div>
+        <div style="font-size:13px;">
+          ${
+            autoLoginActive
+              ? "✓ <strong>이 기기 자동 로그인 활성됨</strong> — 들어갈 때마다 PAT나 비밀번호를 입력할 필요 없이 접속 즉시 열립니다."
+              : "■ 현재 세션 또는 비밀번호 잠금 모드입니다. 아래에서 [이 기기에서 자동 로그인 유지]를 켜면 다음부터 입력 없이 바로 열립니다."
+          }
+        </div>
+      </div>
       ${
-        hasEnc
-          ? `<div style="margin-bottom:14px;padding:12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);">
-              <strong style="font-size:13px;display:block;margin-bottom:6px;">🔑 저장된 간편 비밀번호로 잠금 해제</strong>
+        hasAnyEnc
+          ? `<div style="margin-bottom:16px;padding:14px;background:var(--surface);border:3px solid var(--frame);">
+              <strong class="label" style="display:block;margin-bottom:8px;">UNLOCK WITH PASSWORD // 간편 비밀번호로 잠금 해제</strong>
               <div class="form-row" style="margin-bottom:0;">
                 <input type="password" id="modal-unlock-pin" class="input" placeholder="간편 비밀번호 입력" style="flex:1;" />
-                <button class="btn btn-primary" id="btn-modal-unlock">잠금 해제</button>
+                <button class="ob-btn ob-btn--primary" id="btn-modal-unlock">UNLOCK →</button>
               </div>
             </div>`
           : ""
       }
-      <div style="margin-bottom:10px;">
-        <label style="font-size:12.5px;font-weight:600;display:block;margin-bottom:4px;">저장소 (Owner/Repo)</label>
+      <div style="margin-bottom:12px;">
+        <label class="label" style="display:block;margin-bottom:4px;">VAULT REPOSITORY</label>
         <input type="text" id="modal-repo-input" class="input" value="${esc(state.repo)}" />
       </div>
-      <div style="margin-bottom:10px;">
-        <label style="font-size:12.5px;font-weight:600;display:block;margin-bottom:4px;">GitHub Personal Access Token (PAT)</label>
-        <input type="password" id="modal-pat-input" class="input" value="${esc(state.token)}" placeholder="ghp_... 또는 github_pat_..." />
+      <div style="margin-bottom:12px;">
+        <label class="label" style="display:block;margin-bottom:4px;">GITHUB PERSONAL ACCESS TOKEN (PAT)</label>
+        <input type="password" id="modal-pat-input" class="input" value="${esc(state.token)}" placeholder="github_pat_... 또는 ghp_..." />
       </div>
-      <div style="margin-bottom:14px;">
-        <label style="font-size:12.5px;font-weight:600;display:block;margin-bottom:4px;">간편 비밀번호로 AES-256 암호화 잠금 설정 (선택)</label>
-        <input type="password" id="modal-pin-input" class="input" placeholder="설정 시 토큰을 AES-256으로 암호화해 저장합니다" />
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:14px;cursor:pointer;">
+        <input type="checkbox" id="modal-remember-device" class="task-toggle" checked />
+        <span><strong>이 기기에서 자동 로그인 유지</strong> (다음부터 PAT/비밀번호 입력 없이 바로 열림)</span>
+      </label>
+      <div style="margin-bottom:16px;">
+        <label class="label" style="display:block;margin-bottom:4px;">OPTIONAL PASSWORD // 다른 기기·잠금용 간편 비밀번호 (선택)</label>
+        <input type="password" id="modal-pin-input" class="input" placeholder="설정 시 AES-256으로 암호화 백업 생성" />
       </div>
-      <div style="display:flex;justify-content:space-between;gap:8px;">
-        <button class="btn" id="btn-clear-auth">연결 해제 / 초기화</button>
-        <button class="btn btn-primary" id="btn-save-auth">🔒 저장 및 동기화</button>
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <button class="ob-btn ob-btn--sm" id="btn-clear-auth">LOGOUT / RESET</button>
+        <button class="ob-btn ob-btn--primary ob-btn--sm" id="btn-save-auth">SAVE &amp; AUTO-LOGIN ✓</button>
       </div>
     `;
     modal.classList.add("open");
@@ -1548,14 +1597,12 @@
       );
       if (!target) return;
 
-      // 1. Top nav tab switch
       if (target.hasAttribute("data-tab")) {
         state.activeTab = target.getAttribute("data-tab");
         renderAll();
         return;
       }
 
-      // 2. Jump tab from stat cards
       if (target.hasAttribute("data-jump-tab")) {
         state.activeTab = target.getAttribute("data-jump-tab");
         if (target.hasAttribute("data-thought-filter")) state.thoughtFilter = target.getAttribute("data-thought-filter");
@@ -1564,7 +1611,6 @@
         return;
       }
 
-      // 3. Open note link
       if (target.hasAttribute("data-note-path")) {
         e.preventDefault();
         const p = target.getAttribute("data-note-path");
@@ -1573,35 +1619,30 @@
         return;
       }
 
-      // 4. Unresolved wikilink -> search
       if (target.hasAttribute("data-search-query")) {
         e.preventDefault();
         openSearchModal(target.getAttribute("data-search-query"));
         return;
       }
 
-      // 5. Thought filter
       if (target.hasAttribute("data-thought-filter")) {
         state.thoughtFilter = target.getAttribute("data-thought-filter");
         renderAll();
         return;
       }
 
-      // 6. Investing subtab
       if (target.hasAttribute("data-inv-sub")) {
         state.investingSubtab = target.getAttribute("data-inv-sub");
         renderAll();
         return;
       }
 
-      // 7. Wiki filter
       if (target.hasAttribute("data-wiki-filter")) {
         state.wikiFilter = target.getAttribute("data-wiki-filter");
         renderAll();
         return;
       }
 
-      // 8. Toggle folder in Explorer
       if (target.hasAttribute("data-toggle-folder")) {
         const f = target.getAttribute("data-toggle-folder");
         state.collapsedFolders[f] = !state.collapsedFolders[f];
@@ -1609,21 +1650,19 @@
         return;
       }
 
-      // 9. Trigger GitHub Actions workflow
       if (target.hasAttribute("data-Run-workflow")) {
         const wf = target.getAttribute("data-Run-workflow");
         const inputs = target.getAttribute("data-wf-apply") === "true" ? { apply: true } : {};
         try {
-          showToast(`⚙️ GitHub Actions 실행 요청 중: ${wf}`);
+          showToast(`DISPATCHING WORKFLOW: ${wf}`);
           await ghTriggerWorkflow(wf, inputs);
-          showToast(`✅ 워크플로 실행 시작됨: ${wf}`);
+          showToast(`OK — WORKFLOW STARTED: ${wf}`);
         } catch (err) {
           showToast(err.message);
         }
         return;
       }
 
-      // Button IDs
       const id = target.id;
       if (id === "brand-home") {
         state.activeTab = "triage";
@@ -1637,14 +1676,20 @@
       } else if (id === "btn-close-auth") {
         document.getElementById("auth-modal")?.classList.remove("open");
       } else if (id === "btn-sync-now") {
-        showToast("🔄 볼트 최신 인덱스 동기화 중...");
+        showToast("SYNCING VAULT INDEX...");
         await loadVaultData();
-        showToast("✅ 동기화 완료");
+        showToast("OK — VAULT SYNCHRONIZED");
       } else if (id === "btn-theme-toggle") {
         const root = document.documentElement;
         const next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
         root.setAttribute("data-theme", next);
         localStorage.setItem(STORAGE_KEYS.theme, next);
+      } else if (id === "btn-market-toggle") {
+        const root = document.documentElement;
+        const next = root.getAttribute("data-market") === "kr" ? "us" : "kr";
+        root.setAttribute("data-market", next);
+        localStorage.setItem(STORAGE_KEYS.market, next);
+        target.textContent = `MKT: ${next.toUpperCase()} ▲`;
       } else if (id === "btn-go-full-inbox") {
         state.activeTab = "inbox";
         renderAll();
@@ -1676,7 +1721,7 @@
       } else if (id === "btn-upload-clippings") {
         const input = document.getElementById("clipping-file-input");
         if (!input || !input.files || !input.files.length) {
-          showToast("업로드할 .md 파일을 선택해주세요.");
+          showToast("ERROR — 업로드할 .md 파일을 선택하십시오.");
           return;
         }
         for (const file of input.files) {
@@ -1688,7 +1733,7 @@
           }
         }
         renderAll();
-        showToast(`✅ MD 클리핑 ${input.files.length}건 업로드 완료`);
+        showToast(`OK — UPLOADED ${input.files.length} CLIPPING(S)`);
       } else if (id === "btn-toggle-edit") {
         state.editingNote = !state.editingNote;
         renderAll();
@@ -1713,19 +1758,19 @@
         renderAll();
         if (state.token) {
           try {
-            showToast("💾 GitHub 볼트에 변경사항 커밋 중...");
+            showToast("COMMITTING TO VAULT...");
             await ghPutFile(state.currentNotePath, newRaw, `docs(vault): update ${state.currentNotePath} via Sigma OS Web`);
-            showToast("✅ GitHub 볼트 커밋 완료");
+            showToast("OK — COMMITTED TO VAULT");
           } catch (err) {
             showToast(err.message);
           }
         } else {
-          showToast("⚠️ 브라우저에 반영됨 (GitHub 커밋은 상단 [🔒 보안 연결]에 토큰 필요)");
+          showToast("SAVED IN MEMORY — 영구 커밋은 상단 [AUTH ■]에 토큰 필요");
         }
       } else if (id === "btn-load-full-clipping") {
         const note = state.byPath[state.currentNotePath];
         try {
-          showToast("클리핑 전문을 불러오는 중...");
+          showToast("LOADING FULL TRANSCRIPT...");
           await ensureFullNoteBody(note);
           renderAll();
         } catch (err) {
@@ -1738,37 +1783,53 @@
         const repoVal = document.getElementById("modal-repo-input")?.value || state.repo;
         const patVal = (document.getElementById("modal-pat-input")?.value || document.getElementById("auth-pat-direct")?.value || "").trim();
         const pinVal = (document.getElementById("modal-pin-input")?.value || document.getElementById("auth-pin-setup")?.value || "").trim();
+        const remember =
+          (document.getElementById("modal-remember-device")?.checked ??
+            document.getElementById("auth-remember-direct")?.checked ??
+            true) === true;
+
         if (!patVal) {
-          showToast("GitHub Personal Access Token을 입력해주세요.");
+          showToast("ERROR — GitHub PAT 토큰을 입력하십시오.");
           return;
         }
         state.repo = repoVal.trim();
         state.token = patVal;
         localStorage.setItem(STORAGE_KEYS.repo, state.repo);
         sessionStorage.setItem(STORAGE_KEYS.tokenPlain, patVal);
+
+        // Save encrypted backup if password provided
         if (pinVal) {
           const enc = await encryptTokenWithPassword(patVal, pinVal);
           localStorage.setItem(STORAGE_KEYS.tokenEnc, enc);
-          localStorage.removeItem(STORAGE_KEYS.tokenPlain);
-        } else {
-          localStorage.setItem(STORAGE_KEYS.tokenPlain, patVal);
         }
+
+        // Keep auto-login active in localStorage by default so user NEVER has to re-enter PAT!
+        if (remember) {
+          localStorage.setItem(STORAGE_KEYS.tokenPlain, patVal);
+        } else {
+          localStorage.removeItem(STORAGE_KEYS.tokenPlain);
+        }
+
         document.getElementById("auth-modal")?.classList.remove("open");
         await loadVaultData();
-        showToast("🔒 비공개 GitHub 볼트 연결 완료");
+        showToast("OK — PRIVATE VAULT CONNECTED (AUTO-LOGIN ENABLED)");
       } else if (id === "btn-unlock-pin" || id === "btn-modal-unlock") {
         const pinVal = (document.getElementById("unlock-pin-input")?.value || document.getElementById("modal-unlock-pin")?.value || "").trim();
-        const enc = localStorage.getItem(STORAGE_KEYS.tokenEnc);
+        const enc = localStorage.getItem(STORAGE_KEYS.tokenEnc) || state.cloudVaultEnc;
+        const remember = (document.getElementById("unlock-remember-device")?.checked ?? true) === true;
         if (!pinVal || !enc) return;
         try {
           const pat = await decryptTokenWithPassword(enc, pinVal);
           state.token = pat;
           sessionStorage.setItem(STORAGE_KEYS.tokenPlain, pat);
+          if (remember) {
+            localStorage.setItem(STORAGE_KEYS.tokenPlain, pat);
+          }
           document.getElementById("auth-modal")?.classList.remove("open");
           await loadVaultData();
-          showToast("🔓 잠금 해제 완료");
+          showToast("OK — VAULT UNLOCKED");
         } catch (_) {
-          showToast("❌ 비밀번호가 일치하지 않습니다.");
+          showToast("ERROR — 비밀번호가 일치하지 않습니다.");
         }
       } else if (id === "btn-clear-auth") {
         state.token = "";
@@ -1777,13 +1838,12 @@
         localStorage.removeItem(STORAGE_KEYS.tokenEnc);
         document.getElementById("auth-modal")?.classList.remove("open");
         await loadVaultData();
-        showToast("연결 정보가 초기화되었습니다.");
+        showToast("LOGGED OUT — 연결 정보가 초기화되었습니다.");
       }
     });
 
-    // Task checkbox toggle
     document.addEventListener("change", async (e) => {
-      if (e.target.classList.contains("task-toggle")) {
+      if (e.target.classList.contains("task-toggle") && e.target.hasAttribute("data-path")) {
         const path = e.target.getAttribute("data-path");
         const note = state.byPath[path];
         if (!note) return;
@@ -1793,7 +1853,7 @@
         if (state.token) {
           try {
             await ghPutFile(path, newRaw, `feat(tasks): toggle done=${note.props.done} on ${note.name}`);
-            showToast(`✅ 할 일 상태 저장됨: ${note.name}`);
+            showToast(`OK — TASK UPDATED: ${note.name}`);
           } catch (err) {
             showToast(err.message);
           }
@@ -1801,12 +1861,10 @@
       }
     });
 
-    // Search input
     document.getElementById("search-input")?.addEventListener("input", (e) => {
       runSearch(e.target.value);
     });
 
-    // Keyboard shortcuts (Ctrl+K or / to search, Esc to close modals)
     document.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -1821,7 +1879,11 @@
   /* -------------------- Init -------------------- */
   function init() {
     const savedTheme = localStorage.getItem(STORAGE_KEYS.theme) || "dark";
+    const savedMarket = localStorage.getItem(STORAGE_KEYS.market) || "us";
     document.documentElement.setAttribute("data-theme", savedTheme);
+    document.documentElement.setAttribute("data-market", savedMarket);
+    const mktBtn = document.getElementById("btn-market-toggle");
+    if (mktBtn) mktBtn.textContent = `MKT: ${savedMarket.toUpperCase()} ▲`;
     bindEvents();
     loadVaultData();
   }
