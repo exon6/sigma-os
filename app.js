@@ -560,10 +560,17 @@
       </div>`;
     }
     const ths = headers.map((h) => `<th>${esc(h)}</th>`).join("");
-    const trs = rows.map((r) => `<tr>${r.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("");
+    const trs = rows
+      .map(
+        (r) =>
+          `<tr>${r
+            .map((cell, idx) => `<td data-label="${esc(headers[idx] || "")}"><div>${cell}</div></td>`)
+            .join("")}</tr>`
+      )
+      .join("");
     return `<div class="ob-card">
       <div class="ob-card__head"><span>${esc(title)}</span><span class="ob-badge">${rows.length}</span></div>
-      <div class="table-wrap"><table class="ob-table ob-table--striped"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>
+      <div class="table-wrap"><table class="ob-table ob-table--striped ob-table--responsive"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></div>
     </div>`;
   }
 
@@ -859,9 +866,9 @@
             <input type="text" id="quick-title" class="input" placeholder="TITLE // 노트 제목 (예: 광 인터커넥트 병목에서 Marvell-Lumentum 합병의 의미)" style="flex:1;min-width:220px;" />
           </div>
           <textarea id="quick-body" class="textarea" style="min-height:84px;margin-bottom:12px;" placeholder="떠오른 생각, 원문 메모, 또는 할 일을 입력하십시오. 생각 노트는 ## 원래 메모 섹션에 원형 그대로 보존됩니다."></textarea>
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+          <div class="mobile-stack-actions" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
             <span class="ob-mono" style="font-size:12px;color:var(--muted);">DIRECT COMMIT TO: ${esc(state.repo)} (MAIN)</span>
-            <div style="display:flex;gap:10px;">
+            <div class="mobile-stack-actions" style="display:flex;gap:10px;">
               <button class="ob-btn ob-btn--sm" id="btn-go-full-inbox">FULL INBOX / MD UPLOAD →</button>
               <button class="ob-btn ob-btn--primary" id="btn-quick-save">COMMIT TO VAULT +</button>
             </div>
@@ -1301,7 +1308,10 @@
 
     return `
       <div class="explorer-layout">
-        <aside class="sidebar" aria-label="볼트 폴더 트리">
+        <button class="ob-btn ob-btn--sm mobile-tree-toggle" id="btn-mobile-tree-toggle">
+          ${state.mobileTreeOpen ? "− CLOSE VAULT FOLDERS // 폴더 목록 닫기" : `+ OPEN VAULT FOLDERS // 폴더 목록 열기 (${state.notes.length})`}
+        </button>
+        <aside class="sidebar ${state.mobileTreeOpen ? "mobile-open" : ""}" aria-label="볼트 폴더 트리">
           <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:3px solid var(--frame);margin-bottom:10px;">
             <span class="label">VAULT TREE</span>
             <button class="ob-btn ob-btn--xs" id="btn-back-history" ${state.historyStack.length ? "" : "disabled"}>← BACK</button>
@@ -1313,7 +1323,7 @@
           <div class="note-top-meta">
             <div>
               <div class="note-path">${esc(note.path)}</div>
-              <h2 style="margin:6px 0 0;font-family:var(--font-display);font-size:24px;line-height:30px;color:var(--ink);">${esc(note.name)}</h2>
+              <h2 style="margin:6px 0 0;font-family:var(--font-display);font-size:22px;line-height:28px;color:var(--ink);">${esc(note.name)}</h2>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               ${
@@ -1334,7 +1344,7 @@
 
   function renderAll() {
     renderStatsStrip();
-    document.querySelectorAll(".ob-nav__link").forEach((btn) => {
+    document.querySelectorAll(".ob-nav__link, .mobile-bottom-nav__btn").forEach((btn) => {
       btn.classList.toggle("is-active", btn.getAttribute("data-tab") === state.activeTab);
     });
     const container = document.getElementById("view-container");
@@ -1364,6 +1374,7 @@
     }
     state.currentNotePath = relPath;
     state.editingNote = false;
+    state.mobileTreeOpen = false;
     state.collapsedFolders[note.top_folder] = false;
     state.activeTab = "explorer";
     renderAll();
@@ -1692,6 +1703,9 @@
         target.textContent = `MKT: ${next.toUpperCase()} ▲`;
       } else if (id === "btn-go-full-inbox") {
         state.activeTab = "inbox";
+        renderAll();
+      } else if (id === "btn-mobile-tree-toggle") {
+        state.mobileTreeOpen = !state.mobileTreeOpen;
         renderAll();
       } else if (id === "btn-quick-save") {
         const kind = document.getElementById("quick-kind")?.value || "thought_temp";

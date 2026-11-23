@@ -2,7 +2,7 @@
 <html lang="ko" data-theme="dark" data-market="us">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
   <title>SIGMA OS // ORDERBLOCK VAULT &amp; INBOX</title>
   <meta name="description" content="ORDERBLOCK Finance 디자인 시스템 기반 시그마 OS 비공개 Obsidian 볼트 뷰어, 수집함, 생각 노트 및 6종목 투자 터미널" />
   <link rel="stylesheet" href="styles.css" />
@@ -15,7 +15,7 @@
       <span class="ob-badge" id="connection-badge">LOADING</span>
     </div>
 
-    <nav class="ob-nav__links" aria-label="주요 화면 전환">
+    <nav class="ob-nav__links" aria-label="주요 화면 전환 (데스크톱)">
       <button class="ob-nav__link is-active" data-tab="triage" id="tab-btn-triage">01 // 분류하기 · 홈</button>
       <button class="ob-nav__link" data-tab="inbox" id="tab-btn-inbox">02 // 시그마 수집함</button>
       <button class="ob-nav__link" data-tab="thoughts" id="tab-btn-thoughts">03 // 생각 · 참고 · 영구노트</button>
@@ -24,11 +24,11 @@
     </nav>
 
     <div class="ob-nav__actions">
-      <button class="ob-btn ob-btn--sm" id="btn-open-search" title="볼트 전체 검색 (Ctrl+K)">SEARCH [CTRL+K]</button>
-      <button class="ob-btn ob-btn--sm" id="btn-market-toggle" title="등락 색상 기준 전환 (US: 초록 상승 / KR: 빨강 상승)">MKT: US ▲</button>
+      <button class="ob-btn ob-btn--sm" id="btn-open-search" title="볼트 전체 검색 (Ctrl+K)">SEARCH</button>
+      <button class="ob-btn ob-btn--sm" id="btn-market-toggle" title="등락 색상 기준 전환 (US: 초록 상승 / KR: 빨강 상승)">US ▲</button>
       <button class="ob-btn ob-btn--sm" id="btn-sync-now" title="GitHub 비공개 볼트에서 최신 변경사항 새로고침">SYNC ↗</button>
       <button class="ob-btn ob-btn--sm" id="btn-open-auth" title="비공개 GitHub 연결 및 간편 비밀번호 설정">AUTH ■</button>
-      <button class="ob-btn ob-btn--sm" id="btn-theme-toggle" title="DARK ABYSS / LIGHT PEARL 테마 전환">ABYSS / PEARL</button>
+      <button class="ob-btn ob-btn--sm" id="btn-theme-toggle" title="DARK ABYSS / LIGHT PEARL 테마 전환">THEME</button>
     </div>
   </header>
 
@@ -37,6 +37,30 @@
     <div id="stats-container" class="ob-statrow"></div>
     <div id="view-container"></div>
   </main>
+
+  <!-- Dedicated Mobile Fixed Bottom Tab Bar -->
+  <nav class="mobile-bottom-nav" aria-label="모바일 하단 메뉴">
+    <button class="mobile-bottom-nav__btn is-active" data-tab="triage">
+      <span class="mobile-bottom-nav__num">01</span>
+      <span>홈·분류</span>
+    </button>
+    <button class="mobile-bottom-nav__btn" data-tab="inbox">
+      <span class="mobile-bottom-nav__num">02</span>
+      <span>수집함</span>
+    </button>
+    <button class="mobile-bottom-nav__btn" data-tab="thoughts">
+      <span class="mobile-bottom-nav__num">03</span>
+      <span>생각·참고</span>
+    </button>
+    <button class="mobile-bottom-nav__btn" data-tab="investing">
+      <span class="mobile-bottom-nav__num">04</span>
+      <span>투자·위키</span>
+    </button>
+    <button class="mobile-bottom-nav__btn" data-tab="explorer">
+      <span class="mobile-bottom-nav__num">05</span>
+      <span>볼트전체</span>
+    </button>
+  </nav>
 
   <footer class="ob-footer">
     <div class="ob-footer__base">
@@ -49,7 +73,7 @@
   <div class="modal-backdrop" id="search-modal">
     <div class="modal">
       <div class="modal-header">
-        <span>SEARCH // 볼트 전체 검색 (제목 · 본문 · 태그 · 티커 · 속성)</span>
+        <span>SEARCH // 볼트 전체 검색</span>
         <button class="ob-btn ob-btn--xs" id="btn-close-search">CLOSE [ESC]</button>
       </div>
       <div class="modal-body">
@@ -63,7 +87,7 @@
   <div class="modal-backdrop" id="auth-modal">
     <div class="modal">
       <div class="modal-header">
-        <span>AUTH // 비공개 GITHUB 볼트 연결 &amp; 모든 기기 간편 비밀번호 잠금</span>
+        <span>AUTH // 비공개 GITHUB 볼트 연결</span>
         <button class="ob-btn ob-btn--xs" id="btn-close-auth">CLOSE [✕]</button>
       </div>
       <div class="modal-body" id="auth-modal-body"></div>
