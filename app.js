@@ -876,6 +876,8 @@
         </div>
       </div>
 
+      ${window.SIGMA_V2 ? window.SIGMA_V2.renderHabitHeatmapPanel(state) : ""}
+
       <div class="grid-2">
         <div>
           ${evaluateBaseEmbed("resources.base#다듬을 생각")}
@@ -1178,6 +1180,7 @@
           </div>
         </div>
         <div class="ob-card__body">
+          ${window.SIGMA_V2 ? window.SIGMA_V2.renderEarningsChartPanel() : ""}
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;">
             <button class="ob-chip ${state.investingSubtab === "stocks" ? "is-active" : ""}" data-inv-sub="stocks">01 // 핵심 보유 6종목 &amp; 매크로·신용</button>
             <button class="ob-chip ${state.investingSubtab === "calls" ? "is-active" : ""}" data-inv-sub="calls">02 // 어닝콜 46건 + 대형행사 2건 시계열</button>
@@ -1303,11 +1306,14 @@
             : ""
         }
         ${backlinksHtml}
+        ${window.SIGMA_V2 ? window.SIGMA_V2.renderGraphPanel(note) : ""}
       `;
     }
 
+    const splitActive = Boolean(window.SIGMA_V2 && window.SIGMA_V2.state.splitActive);
+
     return `
-      <div class="explorer-layout">
+      <div class="explorer-layout ${splitActive ? "is-split" : ""}">
         <button class="ob-btn ob-btn--sm mobile-tree-toggle" id="btn-mobile-tree-toggle">
           ${state.mobileTreeOpen ? "− CLOSE VAULT FOLDERS // 폴더 목록 닫기" : `+ OPEN VAULT FOLDERS // 폴더 목록 열기 (${state.notes.length})`}
         </button>
@@ -1326,6 +1332,9 @@
               <h2 style="margin:6px 0 0;font-family:var(--font-display);font-size:22px;line-height:28px;color:var(--ink);">${esc(note.name)}</h2>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button class="ob-btn ob-btn--xs ${splitActive ? "ob-btn--ai" : ""}" id="btn-toggle-split" title="좌측 원문/위키 + 우측 생각/종목 노트 동시 비교·편집">
+                ${splitActive ? "CLOSE SPLIT [✕]" : "◨ SPLIT PANE // 좌우 분할 비교·편집"}
+              </button>
               ${
                 isClipping
                   ? `<span class="ob-badge ob-badge--warning" title="CLAUDE.md 규칙에 따라 Clippings 원본은 수정하지 않고 보존합니다">RAW CLIPPING · READ ONLY</span>`
@@ -1338,6 +1347,8 @@
           </div>
           ${readerBodyHtml}
         </section>
+
+        ${window.SIGMA_V2 ? window.SIGMA_V2.renderSplitPaneRight(state, renderMarkdown, serializeFrontmatterJS) : ""}
       </div>
     `;
   }
@@ -1359,7 +1370,12 @@
     else if (state.activeTab === "inbox") container.innerHTML = renderInboxView();
     else if (state.activeTab === "thoughts") container.innerHTML = renderThoughtsView();
     else if (state.activeTab === "investing") container.innerHTML = renderInvestingView();
-    else if (state.activeTab === "explorer") container.innerHTML = renderExplorerView();
+    else if (state.activeTab === "explorer") {
+      container.innerHTML = renderExplorerView();
+      if (window.SIGMA_V2) {
+        setTimeout(() => window.SIGMA_V2.mountGraphCanvas(state, openNote), 20);
+      }
+    }
   }
 
   /* -------------------- Navigation & Actions -------------------- */
@@ -1604,9 +1620,42 @@
   function bindEvents() {
     document.addEventListener("click", async (e) => {
       const target = e.target.closest(
-        "[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-Run-workflow],button"
+        "[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-Run-workflow],[data-chart-ticker],[data-chart-idx],[data-graph-depth],[data-cal-date],button"
       );
       if (!target) return;
+
+      if (target.hasAttribute("data-chart-ticker")) {
+        if (window.SIGMA_V2) {
+          window.SIGMA_V2.state.chartTicker = target.getAttribute("data-chart-ticker");
+          window.SIGMA_V2.state.chartSelectedIdx = 99;
+          renderAll();
+        }
+        return;
+      }
+
+      if (target.hasAttribute("data-chart-idx")) {
+        if (window.SIGMA_V2) {
+          window.SIGMA_V2.state.chartSelectedIdx = parseInt(target.getAttribute("data-chart-idx"), 10) || 0;
+          renderAll();
+        }
+        return;
+      }
+
+      if (target.hasAttribute("data-graph-depth")) {
+        if (window.SIGMA_V2) {
+          window.SIGMA_V2.state.graphDepth = parseInt(target.getAttribute("data-graph-depth"), 10) || 1;
+          renderAll();
+        }
+        return;
+      }
+
+      if (target.hasAttribute("data-cal-date")) {
+        if (window.SIGMA_V2) {
+          window.SIGMA_V2.state.calSelectedDate = target.getAttribute("data-cal-date");
+          renderAll();
+        }
+        return;
+      }
 
       if (target.hasAttribute("data-tab")) {
         state.activeTab = target.getAttribute("data-tab");
@@ -1707,6 +1756,139 @@
       } else if (id === "btn-mobile-tree-toggle") {
         state.mobileTreeOpen = !state.mobileTreeOpen;
         renderAll();
+      } else if (id === "btn-toggle-split") {
+        if (window.SIGMA_V2) {
+          window.SIGMA_V2.state.splitActive = !window.SIGMA_V2.state.splitActive;
+          renderAll();
+        }
+      } else if (id === "btn-close-split") {
+        if (window.SIGMA_V2) {
+          window.SIGMA_V2.state.splitActive = false;
+          renderAll();
+        }
+      } else if (id === "btn-split-mode-toggle") {
+        if (window.SIGMA_V2) {
+          window.SIGMA_V2.state.splitRightMode = window.SIGMA_V2.state.splitRightMode === "edit" ? "preview" : "edit";
+          renderAll();
+        }
+      } else if (id === "btn-split-insert-ai") {
+        const ta = document.getElementById("split-right-textarea");
+        if (ta) {
+          let v = ta.value.replace(/stage:\s*임시/, "stage: 영구");
+          if (!v.includes("## 주장")) {
+            v += `\n\n## 주장\n\n\n## 근거 · 연결 (AI 확장)\n- \n\n## 반대로 볼 수 있는 점 (AI 확장)\n- \n\n## 이어지는 생각 (AI 확장)\n- \n`;
+          }
+          ta.value = v;
+        }
+      } else if (id === "btn-split-new-thought") {
+        const titleInput = window.prompt("새 생각 노트의 한 문장 제목을 입력하세요:", "");
+        if (!titleInput || !titleInput.trim()) return;
+        const leftNote = state.byPath[state.currentNotePath];
+        const sourceLabel = leftNote ? `[[${leftNote.name}]]` : "시그마 좌우 분할 비교";
+        const payload = buildNewNotePayload("thought_temp", titleInput.trim(), `참조 원문: ${sourceLabel}\n\n`, {
+          date: todayStr(),
+          source: sourceLabel,
+        });
+        upsertNoteInMemory(payload.path, payload.content);
+        if (window.SIGMA_V2) {
+          window.SIGMA_V2.state.splitRightPath = payload.path;
+          window.SIGMA_V2.state.splitRightMode = "edit";
+        }
+        renderAll();
+        showToast(`CREATED IN RIGHT PANE: ${payload.path}`);
+      } else if (id === "btn-split-save") {
+        const ta = document.getElementById("split-right-textarea");
+        const sel = document.getElementById("split-right-select");
+        const targetPath = (window.SIGMA_V2 && window.SIGMA_V2.state.splitRightPath) || (sel && sel.value);
+        if (!ta || !targetPath) return;
+        const newRaw = ta.value;
+        upsertNoteInMemory(targetPath, newRaw);
+        renderAll();
+        if (state.token) {
+          try {
+            showToast(`COMMITTING ${targetPath}...`);
+            await ghPutFile(targetPath, newRaw, `docs(vault): update ${targetPath} via Sigma OS Split Pane`);
+            showToast(`OK — COMMITTED: ${targetPath}`);
+          } catch (err) {
+            showToast(err.message);
+          }
+        } else {
+          showToast("SAVED IN MEMORY — 영구 커밋은 상단 [AUTH ■] 토큰 필요");
+        }
+      } else if (id === "btn-cal-prev" || id === "btn-cal-next") {
+        if (window.SIGMA_V2) {
+          const [yStr, mStr] = window.SIGMA_V2.state.calMonth.split("-");
+          let y = parseInt(yStr, 10) || 2026;
+          let m = parseInt(mStr, 10) || 11;
+          m += id === "btn-cal-next" ? 1 : -1;
+          if (m < 1) {
+            m = 12;
+            y -= 1;
+          } else if (m > 12) {
+            m = 1;
+            y += 1;
+          }
+          const nextYm = `${y}-${String(m).padStart(2, "0")}`;
+          window.SIGMA_V2.state.calMonth = nextYm;
+          window.SIGMA_V2.state.calSelectedDate = `${nextYm}-01`;
+          renderAll();
+        }
+      } else if (id === "btn-save-daily-habit") {
+        if (!window.SIGMA_V2) return;
+        const dStr = window.SIGMA_V2.state.calSelectedDate || todayStr();
+        const relPath = `1. Daily Note/${dStr}.md`;
+        const existing = state.byPath[relPath];
+        const hEx = Boolean(document.getElementById("cal-habit-ex")?.checked);
+        const hFast = Boolean(document.getElementById("cal-habit-fast")?.checked);
+        const hStudy = Boolean(document.getElementById("cal-habit-study")?.checked);
+        const energyRaw = (document.getElementById("cal-energy")?.value || "").trim();
+        const oneThing = (document.getElementById("cal-one-thing")?.value || "").trim();
+        const winVal = (document.getElementById("cal-win")?.value || "").trim();
+        const missVal = (document.getElementById("cal-miss")?.value || "").trim();
+        const tomorrowVal = (document.getElementById("cal-tomorrow")?.value || "").trim();
+
+        const props = existing
+          ? { ...existing.props }
+          : {
+              entity: "저널",
+              journal: "데일리",
+              date: dStr,
+              tags: ["daily"],
+              one_thing: "",
+              win: "",
+              miss: "",
+              tomorrow: "",
+              energy: null,
+              habit_운동: false,
+              habit_저녁금식: false,
+              habit_공부: false,
+            };
+        props["habit_운동"] = hEx;
+        props["habit_저녁금식"] = hFast;
+        props["habit_공부"] = hStudy;
+        props.energy = energyRaw ? parseInt(energyRaw, 10) : null;
+        props.one_thing = oneThing;
+        props.win = winVal;
+        props.miss = missVal;
+        props.tomorrow = tomorrowVal;
+
+        const body = existing
+          ? existing.body
+          : `## 오늘 할 일\n![[context.base#이날 할 일]]\n\n## 메모\n\n\n## 오늘 배운 것\n\n\n## 회고\n`;
+        const newRaw = serializeFrontmatterJS(props, body);
+        upsertNoteInMemory(relPath, newRaw);
+        renderAll();
+        if (state.token) {
+          try {
+            showToast(`COMMITTING DAILY NOTE (${dStr})...`);
+            await ghPutFile(relPath, newRaw, `docs(daily): update habits & review for ${dStr} via Sigma OS Web`);
+            showToast(`OK — DAILY NOTE SAVED (${dStr})`);
+          } catch (err) {
+            showToast(err.message);
+          }
+        } else {
+          showToast("SAVED IN MEMORY — 영구 커밋은 상단 [AUTH ■] 토큰 필요");
+        }
       } else if (id === "btn-quick-save") {
         const kind = document.getElementById("quick-kind")?.value || "thought_temp";
         const title = document.getElementById("quick-title")?.value || "";
@@ -1857,6 +2039,13 @@
     });
 
     document.addEventListener("change", async (e) => {
+      if (e.target.id === "split-right-select") {
+        if (window.SIGMA_V2) {
+          window.SIGMA_V2.state.splitRightPath = e.target.value;
+          renderAll();
+        }
+        return;
+      }
       if (e.target.classList.contains("task-toggle") && e.target.hasAttribute("data-path")) {
         const path = e.target.getAttribute("data-path");
         const note = state.byPath[path];

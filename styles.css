@@ -1288,3 +1288,178 @@ table.ob-table tbody tr:hover td {
     right: 12px;
   }
 }
+
+/* ==========================================================================
+   V2 ADVANCED FEATURES: CHARTS · GRAPH VIEW · SPLIT PANE · HABIT HEATMAP
+   ========================================================================== */
+
+/* 1. Interactive Financial Time-Series Chart (.ob-chart-stage) */
+.ob-chart-stage {
+  background: var(--deep);
+  border: var(--border-thick) solid var(--frame);
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+.ob-chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+.ob-chart-point {
+  cursor: pointer;
+}
+.ob-chart-point:hover {
+  stroke-width: 4px;
+}
+.ob-chart-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface);
+  border: var(--border-chip) solid var(--frame);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.ob-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.ob-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ob-legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 6px;
+}
+
+/* 2. Note Connection Graph View (.ob-graph-box) */
+.ob-graph-box {
+  background: var(--deep);
+  border: var(--border-thick) solid var(--frame);
+  position: relative;
+  width: 100%;
+  margin-top: var(--space-lg);
+}
+.ob-graph-canvas {
+  width: 100%;
+  height: 360px;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+.ob-graph-canvas:active {
+  cursor: grabbing;
+}
+.ob-graph-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--frame);
+  background: var(--canvas);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/* 3. Split Pane Side-by-Side Comparison & Editor (.explorer-layout.is-split) */
+.explorer-layout.is-split {
+  grid-template-columns: 250px minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-md);
+}
+.split-pane-right {
+  background: var(--deep);
+  border: var(--border-heavy) solid var(--ai);
+  padding: var(--space-lg);
+  min-height: 72vh;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* 4. Daily Habit & Review Calendar Heatmap (.ob-cal-grid) */
+.ob-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.ob-cal-dow {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 4px 0;
+  border-bottom: 2px solid var(--frame);
+}
+.ob-cal-cell {
+  min-height: 58px;
+  padding: 4px 6px;
+  border: 2px solid var(--hairline);
+  background: var(--deep);
+  color: var(--body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.ob-cal-cell:hover,
+.ob-cal-cell.is-selected {
+  border-color: var(--frame);
+  outline: 2px solid var(--frame);
+}
+.ob-cal-cell.heat-3 {
+  background: var(--heat-up-2);
+  color: var(--on-fill-dark);
+  border-color: var(--frame);
+}
+.ob-cal-cell.heat-2 {
+  background: var(--heat-up-1);
+  color: var(--on-signal);
+  border-color: var(--on-signal);
+}
+.ob-cal-cell.heat-1 {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--frame);
+}
+.ob-cal-cell.heat-0 {
+  background: var(--canvas);
+  color: var(--muted);
+  border-color: var(--hairline);
+}
+
+@media (max-width: 1100px) {
+  .explorer-layout.is-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .ob-cal-cell {
+    min-height: 46px;
+    padding: 3px 4px;
+    font-size: 10px;
+  }
+  .ob-graph-canvas {
+    height: 280px;
+  }
+  .split-pane-right {
+    padding: 14px 12px;
+    border-width: 3px;
+  }
+}
+
