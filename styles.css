@@ -264,15 +264,26 @@ html, body {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: var(--ticker-block);
+  min-width: var(--ticker-block);
+  width: auto;
   height: var(--ticker-block);
+  padding: 0 10px;
   border: var(--border-chip) solid var(--frame);
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 15px;
   font-weight: 700;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.ob-nav__mark .ob-ticker {
+  width: var(--ticker-block);
+  padding: 0;
+  font-size: 15px;
 }
 
 .ob-nav__links {
