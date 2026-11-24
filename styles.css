@@ -1,26 +1,113 @@
-/* ORDERBLOCK Finance Design System — Sigma OS Vault & Inbox (Desktop + Dedicated Mobile Layout) */
-:root, [data-theme="dark"] {
-  --canvas: #012624; /* Liquid Abyss */
-  --surface: #003734; /* Liquid Kelp */
+/* ORDERBLOCK Finance Design System — Sigma OS Vault & Inbox (Crisp White Mode Default + Dark Mode Option) */
+:root, [data-theme="light"] {
+  --canvas: #ffffff;
+  --surface: #f7faf9;
+  --field: #ffffff;
+  --deep: #f1f5f4;
+  --row-alt: #f8fbfa;
+  --inverse: #012624;
+  --on-inverse: #ffffff;
+  --ink: #011d1c;
+  --body: #0f2928;
+  --muted: #4f6462;
+  --frame: #011d1c;
+  --hairline: #d5e3e1;
+  --yellow: #cbfffc;
+  --yellow-active: #fad1ff;
+  --on-yellow: #011d1c;
+  --accent-ink: #011d1c;
+  --phosphor: #7c3aed;
+  --aurora-1: #cbfffc;
+  --aurora-2: #edfffe;
+  --aurora-3: #fffdfa;
+  --aurora-4: #fad1ff;
+  --chart-line: #7c3aed;
+  --chart-up: #d32f2f;
+  --chart-down: #1d4ed8;
+  --chart-grid: #e2ecea;
+  --chart-axis: #334e4b;
+  --chart-tag: #011d1c;
+  --chart-tag-ink: #ffffff;
+  --block-aqua: #cbfffc;
+  --block-lavender: #fad1ff;
+  --block-mist: #edfffe;
+  --block-mint: #b8f5e4;
+  --block-rose: #ffd6ec;
+  --block-peach: #ffd9c7;
+  --block-kelp: #f1f5f4;
+  --on-block: #011d1c;
+  --block-muted: #3d4f4d;
+  --block-hairline: #00000026;
+  --block-field: #ffffff;
+  --block-up: #a30f1b;
+  --block-down: #1a3a9e;
+  --on-block-kelp: #011d1c;
+  --block-kelp-muted: #4f6462;
+  --block-kelp-surface: #ffffff;
+  --block-kelp-hairline: #d5e3e1;
+  --block-kelp-up: #c62828;
+  --block-kelp-down: #1d4ed8;
+  --link: #1d4ed8;
+  --up: #007a4d;
+  --down: #cf202f;
+  --buy: #007a4d;
+  --sell: #cf202f;
+  --warning: #d97706;
+  --on-signal: #011d1c;
+  --success: #007a4d;
+  --error: #cf202f;
+  --disabled: #f2f8f7;
+  --disabled-ink: #8fa3a1;
+  --disabled-line: #d5e3e1;
+  --kr-up: #c62828;
+  --kr-down: #1d4ed8;
+  --kr-buy: #c62828;
+  --kr-sell: #1d4ed8;
+  --kr-chart-up: #c62828;
+  --kr-chart-down: #1d4ed8;
+  --kr-block-up: #a30f1b;
+  --kr-block-down: #1a3a9e;
+  --kr-block-kelp-up: #c62828;
+  --kr-block-kelp-down: #1d4ed8;
+  --us-up: #007a4d;
+  --us-down: #cf202f;
+  --us-buy: #007a4d;
+  --us-sell: #cf202f;
+  --us-chart-up: #007a4d;
+  --us-chart-down: #cf202f;
+  --us-block-up: #005c38;
+  --us-block-down: #a30f1b;
+  --us-block-kelp-up: #007a4d;
+  --us-block-kelp-down: #cf202f;
+  --flat: #64748b;
+  --caution-ink: #c2410c;
+  --info: #1d4ed8;
+  --ai: #6d28d9;
+  --ai-fill: #7c3aed;
+  --info-fill: #2563eb;
+  --success-fill: #10b981;
+  --error-fill: #ef4444;
+  --neutral-fill: #9ca3af;
+  --on-fill-dark: #ffffff;
+  --heat-up-2: #047857;
+  --heat-up-1: #a7f3d0;
+}
+
+[data-theme="dark"] {
+  --canvas: #012624;
+  --surface: #003734;
   --field: #003734;
-  --deep: #011d1c; /* Liquid Deep */
+  --deep: #011d1c;
   --row-alt: #022f2c;
-  --inverse: #edfffe; /* Liquid Mist */
+  --inverse: #edfffe;
   --on-inverse: #011d1c;
   --ink: #ffffff;
   --body: #edfffe;
   --muted: #bbc7c6;
   --frame: #edfffe;
   --hairline: #0f4a46;
-  --yellow: #cbfffc;
-  --yellow-active: #fad1ff;
-  --on-yellow: #011d1c;
-  --accent-ink: #fde9ff; /* Lavender Phosphor */
+  --accent-ink: #fde9ff;
   --phosphor: #fde9ff;
-  --aurora-1: #cbfffc;
-  --aurora-2: #edfffe;
-  --aurora-3: #fffdfa;
-  --aurora-4: #fad1ff;
   --chart-line: #f0b8ff;
   --chart-up: #f04452;
   --chart-down: #3b82f6;
@@ -28,19 +115,7 @@
   --chart-axis: var(--body);
   --chart-tag: var(--chart-line);
   --chart-tag-ink: #011d1c;
-  --block-aqua: #cbfffc;
-  --block-lavender: #fad1ff;
-  --block-mist: #edfffe;
-  --block-mint: #b8f5e4;
-  --block-rose: #ffd6ec;
-  --block-peach: #ffd9c7;
   --block-kelp: #003734;
-  --on-block: #000000;
-  --block-muted: #3d3d3d;
-  --block-hairline: #0000003d;
-  --block-field: #ffffff;
-  --block-up: #a30f1b;
-  --block-down: #1a3a9e;
   --on-block-kelp: #ffffff;
   --block-kelp-muted: #bbc7c6;
   --block-kelp-surface: #004a45;
@@ -53,7 +128,6 @@
   --buy: #f04452;
   --sell: #3b82f6;
   --warning: #ffa500;
-  --on-signal: var(--on-yellow);
   --success: #0ecb81;
   --error: #ff6b7d;
   --disabled: #003734;
@@ -61,68 +135,13 @@
   --disabled-line: #0f4a46;
   --kr-up: #ff7070;
   --kr-down: #7db3ff;
-  --kr-buy: #f04452;
-  --kr-sell: #3b82f6;
-  --kr-chart-up: #f04452;
-  --kr-chart-down: #3b82f6;
-  --kr-block-up: #a30f1b;
-  --kr-block-down: #1a3a9e;
-  --kr-block-kelp-up: #ff7070;
-  --kr-block-kelp-down: #7db3ff;
   --us-up: #0ecb81;
   --us-down: #ff6b7d;
-  --us-buy: #0ecb81;
-  --us-sell: #f6465d;
-  --us-chart-up: #0ecb81;
-  --us-chart-down: #f6465d;
-  --us-block-up: #005c38;
-  --us-block-down: #a30f1b;
-  --us-block-kelp-up: #0ecb81;
-  --us-block-kelp-down: #ff6b7d;
-  --flat: #bbc7c6;
   --caution-ink: #ffa94d;
   --info: #7db3ff;
   --ai: #c4b5fd;
-  --ai-fill: #7c3aed;
-  --info-fill: #2563eb;
-  --success-fill: #0ecb81;
-  --error-fill: #f6465d;
-  --neutral-fill: #9ca3af;
-  --on-fill-dark: #ffffff;
-}
-
-[data-theme="light"] {
-  --canvas: #ffffff;
-  --surface: #f2f8f7;
-  --field: #eef5f4;
-  --deep: #e6f0ef;
-  --row-alt: #f2f8f7;
-  --inverse: #012624;
-  --on-inverse: #edfffe;
-  --ink: #011d1c;
-  --body: #012624;
-  --muted: #4f6462;
-  --frame: #011d1c;
-  --hairline: #d5e3e1;
-  --accent-ink: #003734;
-  --chart-line: #00706b;
-  --chart-up: #d32f2f;
-  --chart-down: #1d4ed8;
-  --link: #0000ff;
-  --up: #c62828;
-  --down: #1d4ed8;
-  --success: #007a4d;
-  --error: #cf202f;
-  --disabled: #f2f8f7;
-  --disabled-ink: #8fa3a1;
-  --disabled-line: #d5e3e1;
-  --kr-up: #c62828;
-  --kr-down: #1d4ed8;
-  --us-up: #007a4d;
-  --us-down: #cf202f;
-  --caution-ink: #c2410c;
-  --info: #2563eb;
-  --ai: #7c3aed;
+  --heat-up-2: #005c38;
+  --heat-up-1: #0ecb81;
 }
 
 :root[data-market="us"], [data-market="us"] {

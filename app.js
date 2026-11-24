@@ -5,7 +5,7 @@
   const REPO_DEFAULT = "exon6/obsidian-vault";
   const SHELL_REPO = "exon6/sigma-os";
   const STORAGE_KEYS = {
-    theme: "sigma_web_theme",
+    theme: "sigma_web_theme_v2",
     market: "sigma_web_market",
     repo: "sigma_web_repo",
     tokenPlain: "sigma_web_pat",
@@ -2081,7 +2081,7 @@
 
   /* -------------------- Init -------------------- */
   function init() {
-    const savedTheme = localStorage.getItem(STORAGE_KEYS.theme) || "dark";
+    const savedTheme = localStorage.getItem(STORAGE_KEYS.theme) || "light";
     const savedMarket = localStorage.getItem(STORAGE_KEYS.market) || "us";
     document.documentElement.setAttribute("data-theme", savedTheme);
     document.documentElement.setAttribute("data-market", savedMarket);

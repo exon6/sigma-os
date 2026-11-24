@@ -166,6 +166,22 @@
       .replace(/"/g, "&quot;");
   }
 
+  function isLightTheme() {
+    return document.documentElement.getAttribute("data-theme") !== "dark";
+  }
+
+  function resolveSeriesColor(hex) {
+    if (!isLightTheme()) return hex;
+    const map = {
+      "#f0b8ff": "#7c3aed",
+      "#6b9cff": "#2563eb",
+      "#2dd4bf": "#0d9488",
+      "#c084fc": "#9333ea",
+      "#f97316": "#ea580c",
+    };
+    return map[hex] || hex;
+  }
+
   /* ========================================================================
      1. 6-STOCK EARNINGS & CAPEX TIME-SERIES INTERACTIVE SVG CHART
      ======================================================================== */
@@ -213,7 +229,7 @@
     }
     if (yMin < 0) {
       gridSvg.push(
-        `<line x1="${leftPad}" y1="${yZero.toFixed(1)}" x2="${W - rightPad}" y2="${yZero.toFixed(1)}" stroke="var(--prev-close)" stroke-width="1.5" stroke-dasharray="4 4" />`
+        `<line x1="${leftPad}" y1="${yZero.toFixed(1)}" x2="${W - rightPad}" y2="${yZero.toFixed(1)}" stroke="var(--frame)" stroke-width="1.5" stroke-dasharray="4 4" />`
       );
     }
 
@@ -232,6 +248,7 @@
     const singleBarW = barSeries.length ? barGroupWidth / barSeries.length : 16;
 
     barSeries.forEach((s, bIdx) => {
+      const col = resolveSeriesColor(s.color);
       s.values.forEach((v, i) => {
         const cx = xOf(i) - barGroupWidth / 2 + bIdx * singleBarW;
         const yTop = v >= 0 ? yOf(v) : yZero;
@@ -239,28 +256,30 @@
         const bh = Math.max(2, yBot - yTop);
         const isSel = i === selIdx;
         shapesSvg.push(
-          `<rect class="ob-chart-point" data-chart-idx="${i}" x="${cx.toFixed(1)}" y="${yTop.toFixed(1)}" width="${Math.max(4, singleBarW - 2).toFixed(1)}" height="${bh.toFixed(1)}" fill="${s.color}" opacity="${isSel ? "1" : "0.78"}" stroke="${isSel ? "var(--frame)" : "none"}" stroke-width="${isSel ? "2" : "0"}" />`
+          `<rect class="ob-chart-point" data-chart-idx="${i}" x="${cx.toFixed(1)}" y="${yTop.toFixed(1)}" width="${Math.max(4, singleBarW - 2).toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}" opacity="${isSel ? "1" : "0.82"}" stroke="${isSel ? "var(--frame)" : "none"}" stroke-width="${isSel ? "2" : "0"}" />`
         );
       });
     });
 
     lineSeries.forEach((s) => {
+      const col = resolveSeriesColor(s.color);
       const pts = s.values.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
-      shapesSvg.push(`<polyline fill="none" stroke="${s.color}" stroke-width="3" points="${pts}" />`);
+      shapesSvg.push(`<polyline fill="none" stroke="${col}" stroke-width="3" points="${pts}" />`);
       s.values.forEach((v, i) => {
         const cx = xOf(i);
         const cy = yOf(v);
         const isSel = i === selIdx;
         shapesSvg.push(
-          `<rect class="ob-chart-point" data-chart-idx="${i}" x="${(cx - (isSel ? 6 : 4)).toFixed(1)}" y="${(cy - (isSel ? 6 : 4)).toFixed(1)}" width="${isSel ? 12 : 8}" height="${isSel ? 12 : 8}" fill="${isSel ? "var(--ink)" : s.color}" stroke="var(--on-yellow)" stroke-width="2" />`
+          `<rect class="ob-chart-point" data-chart-idx="${i}" x="${(cx - (isSel ? 6 : 4)).toFixed(1)}" y="${(cy - (isSel ? 6 : 4)).toFixed(1)}" width="${isSel ? 12 : 8}" height="${isSel ? 12 : 8}" fill="${isSel ? "var(--ink)" : col}" stroke="var(--canvas)" stroke-width="2" />`
         );
       });
       // Right-axis ORDERBLOCK current value tag for primary line
       const lastVal = s.values[s.values.length - 1];
       const lastY = yOf(lastVal);
+      const tagInk = isLightTheme() ? "#ffffff" : "#011d1c";
       shapesSvg.push(
-        `<rect x="${W - rightPad + 6}" y="${(lastY - 10).toFixed(1)}" width="${rightPad - 10}" height="20" fill="${s.color}" />`,
-        `<text x="${W - rightPad + 11}" y="${(lastY + 4).toFixed(1)}" fill="#011d1c" font-family="var(--font-mono)" font-size="11" font-weight="700">${lastVal}${cfg.unit}</text>`
+        `<rect x="${W - rightPad + 6}" y="${(lastY - 10).toFixed(1)}" width="${rightPad - 10}" height="20" fill="${col}" />`,
+        `<text x="${W - rightPad + 11}" y="${(lastY + 4).toFixed(1)}" fill="${tagInk}" font-family="var(--font-mono)" font-size="11" font-weight="700">${lastVal}${cfg.unit}</text>`
       );
     });
 
@@ -274,12 +293,12 @@
     const legendHtml = cfg.series
       .map(
         (s) =>
-          `<span class="ob-legend-item"><span class="ob-legend-swatch" style="background:${s.color};"></span><span>${esc(s.name)}</span></span>`
+          `<span class="ob-legend-item"><span class="ob-legend-swatch" style="background:${resolveSeriesColor(s.color)};"></span><span>${esc(s.name)}</span></span>`
       )
       .join("");
 
     const selValuesHtml = cfg.series
-      .map((s) => `<span>${esc(s.name.split(" (")[0])}: <strong style="color:${s.color};">${s.values[selIdx]}${cfg.unit}</strong></span>`)
+      .map((s) => `<span>${esc(s.name.split(" (")[0])}: <strong style="color:${resolveSeriesColor(s.color)};">${s.values[selIdx]}${cfg.unit}</strong></span>`)
       .join(" · ");
 
     return `
@@ -554,13 +573,13 @@
     let dragMoved = false;
 
     function draw() {
-      const isLight = document.documentElement.getAttribute("data-theme") === "light";
+      const isLight = isLightTheme();
       ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = isLight ? "#e6f0ef" : "#011d1c";
+      ctx.fillStyle = isLight ? "#ffffff" : "#011d1c";
       ctx.fillRect(0, 0, W, H);
 
       // Subtle grid
-      ctx.strokeStyle = isLight ? "#d5e3e1" : "#0f4a46";
+      ctx.strokeStyle = isLight ? "#e8efee" : "#0f4a46";
       ctx.lineWidth = 1;
       for (let gx = 40; gx < W; gx += 60) {
         ctx.beginPath();
@@ -581,8 +600,8 @@
         const t = byId[e.target];
         if (!s || !t) return;
         const active = hoverNode && (hoverNode.id === s.id || hoverNode.id === t.id);
-        ctx.strokeStyle = active ? (isLight ? "#011d1c" : "#edfffe") : isLight ? "#8fa3a1" : "#1f6b65";
-        ctx.lineWidth = active ? 2.2 : 1.2;
+        ctx.strokeStyle = active ? (isLight ? "#011d1c" : "#edfffe") : isLight ? "#9bb0ad" : "#1f6b65";
+        ctx.lineWidth = active ? 2.4 : 1.3;
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
         ctx.lineTo(t.x, t.y);
@@ -595,7 +614,7 @@
         const isHover = hoverNode && hoverNode.id === n.id;
         ctx.fillStyle = n.color;
         ctx.fillRect(n.x - sz / 2, n.y - sz / 2, sz, sz);
-        ctx.strokeStyle = isHover ? "#ffffff" : "#011d1c";
+        ctx.strokeStyle = isHover ? "#7c3aed" : isLight ? "#011d1c" : "#011d1c";
         ctx.lineWidth = isHover ? 3 : 2;
         ctx.strokeRect(n.x - sz / 2, n.y - sz / 2, sz, sz);
 
