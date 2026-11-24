@@ -551,19 +551,19 @@ html, body {
 /* ---------- Stat Row (.ob-statrow) — 5 Distinct Color-Coded KPI Cards ---------- */
 .ob-statrow {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: var(--space-md);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-sm);
   padding: 0;
-  margin-bottom: var(--space-xl);
+  margin-bottom: var(--space-md);
 }
 .ob-stat {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 14px 16px;
+  gap: 2px;
+  padding: 10px 14px;
   background: var(--canvas);
   border: 2px solid var(--frame);
-  border-left: 6px solid #2563eb;
+  border-left: 5px solid #2563eb;
   cursor: pointer;
   min-width: 0;
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
@@ -599,14 +599,14 @@ html, body {
   font-size: 11px;
   line-height: 14px;
   font-weight: 700;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
   color: var(--muted);
 }
 .ob-stat__value {
   font-family: var(--font-mono);
-  font-size: 34px;
-  line-height: 38px;
+  font-size: 26px;
+  line-height: 30px;
   font-weight: 700;
   letter-spacing: -0.3px;
   color: var(--accent-ink);
@@ -614,7 +614,7 @@ html, body {
 }
 .ob-stat__sub {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--body);
   font-weight: 600;
   overflow: hidden;
@@ -757,6 +757,77 @@ html, body {
   flex-wrap: wrap;
   gap: var(--space-sm);
   margin-bottom: var(--space-sm);
+}
+
+/* ---------- Minimal Quick Sigma Inbox (.quick-inbox-card) ---------- */
+.quick-inbox-card > .ob-card__head {
+  min-height: 40px;
+  padding: 6px var(--space-md);
+}
+.quick-inbox-head-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.quick-inbox-card > .ob-card__body {
+  padding: var(--space-md);
+}
+.quick-row--top {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.quick-kind-select {
+  flex: 0 0 150px;
+  height: 38px;
+  padding: 0 10px;
+  font-family: var(--font-sans);
+  font-weight: 700;
+}
+.quick-title-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  font-family: var(--font-sans);
+}
+.quick-body-textarea {
+  min-height: 76px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+}
+.quick-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.quick-clip-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.quick-file-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.quick-file-hidden:focus-visible + #label-choose-clippings {
+  outline: 2px solid var(--primary-bg);
+  outline-offset: 2px;
+}
+.quick-action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 /* ---------- Checkbox (.ob-check__box) ---------- */
@@ -1165,26 +1236,44 @@ table.ob-table tbody tr:hover td {
 /* ==========================================================================
    DEDICATED MOBILE VERSION LAYOUT (<= 768px)
    ========================================================================== */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .ob-statrow {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .ob-stat {
+    padding: 8px 10px;
+  }
+  .ob-stat__value {
+    font-size: 22px;
+    line-height: 26px;
+  }
+}
+
 @media (max-width: 768px) {
   body {
-    padding-bottom: 66px; /* Space for fixed bottom tab bar */
+    padding-bottom: 58px; /* Space for fixed 4-tab bottom bar */
     font-size: 13.8px;
   }
 
-  /* 1. Compact Mobile Top Header */
+  /* 1. Single-Row Compact Mobile Top Header */
   .ob-nav {
-    padding: 8px 12px;
-    gap: 8px;
-    min-height: 52px;
+    padding: 6px 10px;
+    gap: 6px;
+    min-height: 44px;
+    flex-wrap: nowrap;
   }
   .ob-nav__mark {
-    font-size: 16px;
-    gap: 8px;
+    font-size: 15px;
+    gap: 6px;
   }
   .ob-nav__mark .ob-ticker {
-    width: 26px;
-    height: 26px;
-    font-size: 13px;
+    width: 24px;
+    height: 24px;
+    font-size: 12.5px;
+  }
+  #connection-badge {
+    display: none;
   }
   /* Hide desktop horizontal nav links on mobile; use fixed bottom tab bar instead */
   .ob-nav__links {
@@ -1192,16 +1281,18 @@ table.ob-table tbody tr:hover td {
   }
   .ob-nav__actions {
     gap: 4px;
+    flex-wrap: nowrap;
   }
   .ob-nav__actions .ob-btn {
-    height: 28px;
-    padding: 0 8px;
-    font-size: 10.5px;
-    letter-spacing: 0.5px;
-    border-width: 2px;
+    height: 26px;
+    padding: 0 7px;
+    font-size: 10px;
+    letter-spacing: 0.3px;
+    border-width: 1.5px;
+    white-space: nowrap;
   }
 
-  /* 2. Fixed Mobile Bottom Tab Bar */
+  /* 2. Fixed Mobile 4-Tab Bottom Bar */
   .mobile-bottom-nav {
     position: fixed;
     bottom: 0;
@@ -1209,8 +1300,8 @@ table.ob-table tbody tr:hover td {
     right: 0;
     z-index: 90;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    height: 56px;
+    grid-template-columns: repeat(4, 1fr);
+    height: 50px;
     background: var(--deep);
     border-top: var(--border-thick) solid var(--frame);
   }
@@ -1223,13 +1314,13 @@ table.ob-table tbody tr:hover td {
     font-family: var(--font-sans);
     font-size: 11px;
     font-weight: 700;
-    line-height: 1.25;
-    padding: 4px 2px;
+    line-height: 1.2;
+    padding: 3px 2px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
+    gap: 1px;
     cursor: pointer;
   }
   .mobile-bottom-nav__btn:last-child {
@@ -1237,7 +1328,7 @@ table.ob-table tbody tr:hover td {
   }
   .mobile-bottom-nav__num {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 9.5px;
     color: var(--accent-ink);
   }
   .mobile-bottom-nav__btn.is-active {
@@ -1250,56 +1341,68 @@ table.ob-table tbody tr:hover td {
 
   /* 3. Workspace & Grids -> Single Full-Width Column on Mobile */
   .workspace {
-    padding: 12px 10px;
+    padding: 8px 10px;
   }
   .grid-2, .grid-3 {
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: 10px;
   }
 
-  /* 4. Compact 2-Column Stat Strip on Mobile */
+  /* 4. Ultra-Compact 5-Column Single-Row KPI Dashboard on Mobile */
   .ob-statrow {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px 8px;
-    padding: 10px 0;
-    margin-bottom: 14px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    padding: 0;
+    margin-bottom: 8px;
   }
   .ob-stat {
-    padding: 0 8px;
-    border-left-width: 2px;
+    padding: 5px 3px;
+    gap: 1px;
+    align-items: center;
+    text-align: center;
+    border-width: 1.5px;
+    border-left-width: 1.5px;
+    border-top-width: 3.5px;
+    box-shadow: none;
   }
-  .ob-stat:nth-child(5) {
-    grid-column: 1 / -1;
-  }
-  .ob-stat__value {
-    font-size: 22px;
-    line-height: 26px;
+  .ob-stat:nth-child(1) { border-left-color: var(--frame); border-top-color: #2563eb; }
+  .ob-stat:nth-child(2) { border-left-color: var(--frame); border-top-color: #7c3aed; }
+  .ob-stat:nth-child(3) { border-left-color: var(--frame); border-top-color: #059669; }
+  .ob-stat:nth-child(4) { border-left-color: var(--frame); border-top-color: #0284c7; }
+  .ob-stat:nth-child(5) { border-left-color: var(--frame); border-top-color: #d97706; grid-column: auto; }
+  .ob-stat .stat-en,
+  .ob-stat__sub {
+    display: none;
   }
   .ob-stat__label {
-    font-size: 10px;
+    font-size: 9.5px;
+    line-height: 12px;
+    letter-spacing: -0.2px;
+    white-space: nowrap;
   }
-  .ob-stat__sub {
-    font-size: 10.5px;
+  .ob-stat__value {
+    font-size: 17px;
+    line-height: 20px;
   }
 
-  /* 5. Cards, Blocks, Forms & Buttons on Mobile */
+  /* 5. Cards, Blocks, Forms & Above-The-Fold Minimal Quick Sigma Inbox */
   .ob-card {
-    margin-bottom: 14px;
+    margin-bottom: 12px;
   }
   .ob-card--elevated {
-    border-width: 3px;
+    border-width: 2.5px;
   }
   .ob-card__head {
-    padding: 8px 12px;
-    min-height: 38px;
-    font-size: 12.5px;
+    padding: 6px 10px;
+    min-height: 34px;
+    font-size: 12px;
   }
   .ob-card__body {
-    padding: 12px;
+    padding: 10px;
   }
   .ob-block {
-    padding: 14px 12px;
-    margin-bottom: 14px;
+    padding: 12px 10px;
+    margin-bottom: 12px;
   }
   .form-row {
     flex-direction: column;
@@ -1310,22 +1413,78 @@ table.ob-table tbody tr:hover td {
     min-width: 0 !important;
     width: 100% !important;
   }
-  .mobile-stack-actions {
-    flex-direction: column !important;
-    align-items: stretch !important;
-  }
-  .mobile-stack-actions > * {
-    width: 100% !important;
-    display: flex !important;
-    justify-content: center !important;
-  }
   .ob-btn {
-    padding: 0 12px;
+    padding: 0 10px;
     font-size: 12px;
-    letter-spacing: 1px;
+    letter-spacing: 0.6px;
     white-space: normal;
     text-align: center;
     line-height: 1.25;
+  }
+
+  /* Mobile Quick Inbox Compact Overrides */
+  .quick-inbox-card {
+    margin-bottom: 10px;
+  }
+  .quick-inbox-card > .ob-card__head {
+    min-height: 32px;
+    padding: 4px 10px;
+    flex-wrap: nowrap;
+  }
+  .quick-inbox-card > .ob-card__body {
+    padding: 8px 10px;
+  }
+  .quick-row--top {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .quick-kind-select {
+    flex: 0 0 108px;
+    width: 108px;
+    height: 36px;
+    padding: 0 6px;
+    font-size: 16px;
+  }
+  .quick-title-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 36px;
+    padding: 0 8px;
+    font-size: 16px;
+  }
+  .quick-body-textarea {
+    min-height: 68px;
+    height: 68px;
+    margin-bottom: 6px;
+    padding: 6px 8px;
+    font-size: 16px;
+    line-height: 1.4;
+  }
+  .quick-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .quick-clip-group,
+  .quick-action-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    width: 100%;
+    margin-left: 0;
+  }
+  #label-choose-clippings,
+  #btn-upload-clippings,
+  #btn-dispatch-workflows,
+  #btn-quick-save {
+    width: 100%;
+    height: 34px;
+    padding: 0 8px;
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
   }
 
   /* 6. Transform .base Tables (.ob-table--responsive) into Vertical Mobile Cards! */

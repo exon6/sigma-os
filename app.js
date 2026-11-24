@@ -136,7 +136,7 @@
   }
 
   async function ghFetch(apiPath, options = {}) {
-    if (!state.token) throw new Error("ERROR — GitHub PAT 토큰이 없습니다. 상단 [AUTH ■]에서 1회 연결해주세요.");
+    if (!state.token) throw new Error("ERROR — GitHub PAT 토큰이 연결되지 않은 기기입니다.");
     const headers = Object.assign(
       {
         Authorization: `Bearer ${state.token}`,
@@ -164,7 +164,7 @@
     return ghFetch(`/repos/${state.repo}/contents/${encodeRepoPath(relPath)}?ref=main`, { raw: true });
   }
 
-  async function ghPutFile(relPath, contentStr, commitMsg, targetRepo = state.repo) {
+  async function ghPutFileBase64(relPath, b64Content, commitMsg, targetRepo = state.repo) {
     let sha = undefined;
     try {
       const existing = await ghFetch(`/repos/${targetRepo}/contents/${encodeRepoPath(relPath)}?ref=main`);
@@ -176,11 +176,15 @@
       method: "PUT",
       body: {
         message: commitMsg,
-        content: utf8ToB64(contentStr),
+        content: b64Content,
         sha,
         branch: "main",
       },
     });
+  }
+
+  async function ghPutFile(relPath, contentStr, commitMsg, targetRepo = state.repo) {
+    return ghPutFileBase64(relPath, utf8ToB64(contentStr), commitMsg, targetRepo);
   }
 
   async function ghTriggerWorkflow(workflowFile, inputs = {}) {
@@ -440,7 +444,7 @@
           formatPropVal(n.props.box),
           `<span class="ob-mono">${esc(n.ctime)}</span>`,
         ]),
-        "0. Inbox/ 에 미분류 메모가 없습니다. 상단 QUICK CAPTURE에서 새 생각이나 메모를 즉시 기록할 수 있습니다."
+        "미분류 메모가 없습니다."
       );
     }
 
@@ -773,27 +777,27 @@
 
     container.innerHTML = `
       <div class="ob-stat" data-jump-tab="explorer">
-        <span class="ob-stat__label">VAULT NOTES // 전체 노트</span>
+        <span class="ob-stat__label"><span class="stat-en">VAULT NOTES // </span>전체 노트</span>
         <span class="ob-stat__value">${state.notes.length}</span>
         <span class="ob-stat__sub">10 FOLDERS · PRIVATE SYNC</span>
       </div>
       <div class="ob-stat" data-jump-tab="thoughts" data-thought-filter="all">
-        <span class="ob-stat__label">ZETTELKASTEN // 생각·영구·참고</span>
+        <span class="ob-stat__label"><span class="stat-en">ZETTELKASTEN // </span>생각·참고</span>
         <span class="ob-stat__value">${thoughts.length + refs.length}</span>
         <span class="ob-stat__sub">PERM ${permThoughts.length} · TEMP ${tempThoughts.length} · REF ${refs.length}</span>
       </div>
       <div class="ob-stat" data-jump-tab="investing" data-inv-sub="stocks">
-        <span class="ob-stat__label">CORE HOLDINGS // 핵심 보유 종목</span>
+        <span class="ob-stat__label"><span class="stat-en">CORE HOLDINGS // </span>보유종목</span>
         <span class="ob-stat__value">${stocks.length}</span>
-        <span class="ob-stat__sub">NVDA · AVGO · MRVL · GOOGL · ANT · SPCX</span>
+        <span class="ob-stat__sub">NVDA·AVGO·MRVL·GOOGL·ANT·SPCX</span>
       </div>
       <div class="ob-stat" data-jump-tab="investing" data-inv-sub="wiki">
-        <span class="ob-stat__label">LLM WIKI &amp; CALLS // 위키·어닝콜</span>
+        <span class="ob-stat__label"><span class="stat-en">LLM WIKI // </span>위키·콜</span>
         <span class="ob-stat__value">${wikiCount}</span>
         <span class="ob-stat__sub">48 CALLS/EVENTS · 75 SEC FILINGS</span>
       </div>
       <div class="ob-stat" data-jump-tab="triage">
-        <span class="ob-stat__label">ACTIVE TASKS // 할 일 · 대기 클립</span>
+        <span class="ob-stat__label"><span class="stat-en">ACTIVE TASKS // </span>할일·클립</span>
         <span class="ob-stat__value">${openTasks}</span>
         <span class="ob-stat__sub">INGEST PENDING: ${pendingClippings} CLIPS</span>
       </div>
@@ -848,39 +852,43 @@
     `;
   }
 
-  /* 1. Triage / Home View */
+  /* 1. Triage / Home View (Integrated Minimal Quick Sigma Inbox) */
   function renderTriageView() {
     const latestDaily = state.notes
       .filter((n) => n.top_folder === "1. Daily Note")
       .sort((a, b) => b.name.localeCompare(a.name))[0];
 
     return `
-      <!-- Quick Inbox Capture Bar -->
-      <div class="ob-card ob-card--elevated">
+      <!-- Minimal Quick Sigma Inbox -->
+      <div class="ob-card ob-card--elevated quick-inbox-card">
         <div class="ob-card__head">
-          <span>QUICK CAPTURE // 빠른 시그마 수집함 (생각 · 참고 · 할 일 즉시 커밋)</span>
-          <div style="display:flex;gap:8px;align-items:center;">
-            ${latestDaily ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(latestDaily.path)}">DAILY: ${esc(latestDaily.name)}</button>` : ""}
-            <a href="https://sigma-inbox.emeraldtuna8.chatgpt.site" target="_blank" rel="noopener" class="ob-btn ob-btn--xs">CHATGPT INBOX ↗</a>
+          <span>빠른 시그마 수집함</span>
+          <div class="quick-inbox-head-actions">
+            ${latestDaily ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(latestDaily.path)}">오늘 노트</button>` : ""}
           </div>
         </div>
         <div class="ob-card__body">
-          <div class="form-row">
-            <select id="quick-kind" class="select" style="flex:0 0 220px;">
-              <option value="thought_temp">TEMP THOUGHT // 임시 생각</option>
-              <option value="thought_perm">PERM THOUGHT // 영구 생각</option>
-              <option value="reference">REFERENCE // 참고 노트</option>
-              <option value="task">TASK // 할 일 · 일정</option>
-              <option value="inbox">RAW INBOX // 0. Inbox 메모</option>
+          <div class="quick-row--top">
+            <select id="quick-kind" class="select quick-kind-select" aria-label="노트 종류">
+              <option value="thought_temp">임시 생각</option>
+              <option value="thought_perm">영구 생각</option>
+              <option value="reference">참고 노트</option>
+              <option value="task">할 일</option>
+              <option value="schedule">일정</option>
+              <option value="inbox">메모</option>
             </select>
-            <input type="text" id="quick-title" class="input" placeholder="TITLE // 노트 제목 (예: 광 인터커넥트 병목에서 Marvell-Lumentum 합병의 의미)" style="flex:1;min-width:220px;" />
+            <input type="text" id="quick-title" class="input quick-title-input" placeholder="제목" aria-label="제목" />
           </div>
-          <textarea id="quick-body" class="textarea" style="min-height:84px;margin-bottom:12px;" placeholder="떠오른 생각, 원문 메모, 또는 할 일을 입력하십시오. 생각 노트는 ## 원래 메모 섹션에 원형 그대로 보존됩니다."></textarea>
-          <div class="mobile-stack-actions" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-            <span class="ob-mono" style="font-size:12px;color:var(--muted);">DIRECT COMMIT TO: ${esc(state.repo)} (MAIN)</span>
-            <div class="mobile-stack-actions" style="display:flex;gap:10px;">
-              <button class="ob-btn ob-btn--sm" id="btn-go-full-inbox">FULL INBOX / MD UPLOAD →</button>
-              <button class="ob-btn ob-btn--primary" id="btn-quick-save">COMMIT TO VAULT +</button>
+          <textarea id="quick-body" class="textarea quick-body-textarea" placeholder="내용" aria-label="내용"></textarea>
+          <div class="quick-toolbar">
+            <div class="quick-clip-group">
+              <input type="file" id="clipping-file-input" accept=".md,text/markdown" multiple class="quick-file-hidden" aria-label="클리핑 파일 선택" />
+              <label for="clipping-file-input" class="ob-btn ob-btn--sm" id="label-choose-clippings">파일 선택</label>
+              <button type="button" class="ob-btn ob-btn--sm" id="btn-upload-clippings">클리핑 업로드</button>
+            </div>
+            <div class="quick-action-group">
+              <button type="button" class="ob-btn ob-btn--sm" id="btn-dispatch-workflows">워크플로우 디스패치 ↗</button>
+              <button type="button" class="ob-btn ob-btn--primary ob-btn--sm" id="btn-quick-save">저장 +</button>
             </div>
           </div>
         </div>
@@ -903,101 +911,7 @@
     `;
   }
 
-  /* 2. Built-in Sigma Inbox View */
-  function renderInboxView() {
-    return `
-      <div class="grid-2">
-        <div class="ob-card ob-card--elevated">
-          <div class="ob-card__head">
-            <span>SIGMA INBOX // 새 노트 · 생각 · 할 일 작성</span>
-            <span class="ob-badge ob-badge--yellow">DIRECT COMMIT</span>
-          </div>
-          <div class="ob-card__body">
-            <div class="form-row">
-              <div style="flex:1;min-width:160px;">
-                <label class="label" style="display:block;margin-bottom:4px;">RECORD TYPE</label>
-                <select id="inbox-kind" class="select">
-                  <option value="thought_temp">생각 노트 (임시 · 다듬을 생각)</option>
-                  <option value="thought_perm">생각 노트 (영구 · 주장+AI확장 틀)</option>
-                  <option value="reference">참고 노트 (책·영상·기사 대목과 반응)</option>
-                  <option value="task">할 일 (5. Tasks)</option>
-                  <option value="schedule">일정 (5. Tasks · type: 일정)</option>
-                  <option value="inbox">미분류 수집함 메모 (0. Inbox)</option>
-                </select>
-              </div>
-              <div style="flex:1;min-width:130px;">
-                <label class="label" style="display:block;margin-bottom:4px;">IMPORTANCE</label>
-                <select id="inbox-importance" class="select">
-                  <option value="일반">일반 (NORMAL)</option>
-                  <option value="중요">중요 (HIGH)</option>
-                </select>
-              </div>
-              <div style="flex:1;min-width:150px;">
-                <label class="label" style="display:block;margin-bottom:4px;">DATE</label>
-                <input type="date" id="inbox-date" class="input" value="${todayStr()}" />
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div style="flex:2;min-width:220px;">
-                <label class="label" style="display:block;margin-bottom:4px;">NOTE TITLE</label>
-                <input type="text" id="inbox-title" class="input" placeholder="노트 제목 (파일명)" />
-              </div>
-              <div style="flex:1;min-width:160px;">
-                <label class="label" style="display:block;margin-bottom:4px;">SOURCE / AUTHOR</label>
-                <input type="text" id="inbox-source" class="input" placeholder="출처 또는 저자" />
-              </div>
-            </div>
-
-            <div style="margin-bottom:12px;">
-              <label class="label" style="display:block;margin-bottom:4px;">ONE-LINE SUMMARY</label>
-              <input type="text" id="inbox-summary" class="input" placeholder="표 뷰에 표시될 한 줄 요약 (선택)" />
-            </div>
-
-            <div style="margin-bottom:16px;">
-              <label class="label" style="display:block;margin-bottom:4px;">ORIGINAL MEMO // 내 원문 메모 (원형 보존)</label>
-              <textarea id="inbox-body" class="textarea" style="min-height:180px;" placeholder="내 생각이나 메모 원문을 작성하십시오."></textarea>
-            </div>
-
-            <button class="ob-btn ob-btn--primary" id="btn-inbox-submit" style="width:100%;">COMMIT NOTE TO PRIVATE VAULT +</button>
-          </div>
-        </div>
-
-        <div>
-          <div class="ob-card">
-            <div class="ob-card__head">
-              <span>MD CLIPPING UPLOAD // 웹 클리핑 원본 업로드</span>
-              <span class="ob-badge ob-badge--low">BYTE-PRESERVED</span>
-            </div>
-            <div class="ob-card__body">
-              <p style="color:var(--muted);margin-bottom:12px;">
-                어닝콜 트랜스크립트, 유튜브 자막, 기사 등 <code>.md</code> 클리핑 파일을 원본 바이트 그대로 <code>Clippings/</code> 폴더에 업로드합니다.
-              </p>
-              <input type="file" id="clipping-file-input" accept=".md,text/markdown" multiple class="input" style="margin-bottom:12px;" />
-              <button class="ob-btn" id="btn-upload-clippings" style="width:100%;">UPLOAD .MD TO CLIPPINGS/ ↗</button>
-            </div>
-          </div>
-
-          <div class="ob-block ob-tone-peach" style="padding:24px;">
-            <div style="font-family:var(--font-display);font-size:16px;text-transform:uppercase;margin-bottom:8px;">
-              WORKFLOW DISPATCH // 시그마 OS 자동화 즉시 실행
-            </div>
-            <p style="font-size:13px;margin-bottom:14px;">
-              아침 정기 스케줄(06:15 수집함 · 07:00 매크로 · 07:30 IR · 08:00 SEC)을 기다리지 않고 GitHub Actions를 즉시 가동합니다.
-            </p>
-            <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:10px;">
-              <button class="ob-btn ob-btn--sm" data-Run-workflow="sigma-inbox-sync.yml" data-wf-apply="true">RUN INBOX SYNC ↗</button>
-              <button class="ob-btn ob-btn--sm" data-Run-workflow="sigma-macro-sync.yml">RUN FRED MACRO ↗</button>
-              <button class="ob-btn ob-btn--sm" data-Run-workflow="sigma-ir-sync.yml">RUN 6-STOCK IR ↗</button>
-              <button class="ob-btn ob-btn--sm" data-Run-workflow="sigma-sec-wiki.yml">RUN SEC EDGAR ↗</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  /* 3. Thoughts, Permanent & Reference Notes View */
+  /* 2. Thoughts, Permanent & Reference Notes View */
   function renderThoughtsView() {
     const allResourceNotes = state.notes.filter(
       (n) => n.top_folder === "6. Resources" && n.folder !== "6. Resources/Stocks"
@@ -1054,7 +968,7 @@
       <div class="ob-card ob-card--elevated">
         <div class="ob-card__head">
           <span>ZETTELKASTEN // 생각 노트 · 영구 노트 · 참고 노트 (${filtered.length})</span>
-          <button class="ob-btn ob-btn--primary ob-btn--sm" data-jump-tab="inbox">NEW THOUGHT +</button>
+          <button class="ob-btn ob-btn--primary ob-btn--sm" id="btn-new-thought-jump" data-jump-tab="triage" data-focus-quick="true">NEW THOUGHT +</button>
         </div>
         <div class="ob-card__body">
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;">
@@ -1376,15 +1290,16 @@
       return;
     }
 
-    if (state.activeTab === "triage") container.innerHTML = renderTriageView();
-    else if (state.activeTab === "inbox") container.innerHTML = renderInboxView();
-    else if (state.activeTab === "thoughts") container.innerHTML = renderThoughtsView();
+    if (state.activeTab === "thoughts") container.innerHTML = renderThoughtsView();
     else if (state.activeTab === "investing") container.innerHTML = renderInvestingView();
     else if (state.activeTab === "explorer") {
       container.innerHTML = renderExplorerView();
       if (window.SIGMA_V2) {
         setTimeout(() => window.SIGMA_V2.mountGraphCanvas(state, openNote), 20);
       }
+    } else {
+      state.activeTab = "triage";
+      container.innerHTML = renderTriageView();
     }
   }
 
@@ -1630,7 +1545,7 @@
   function bindEvents() {
     document.addEventListener("click", async (e) => {
       const target = e.target.closest(
-        "[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-Run-workflow],[data-chart-ticker],[data-chart-idx],[data-graph-depth],[data-cal-date],button"
+        "[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-chart-ticker],[data-chart-idx],[data-graph-depth],[data-cal-date],button"
       );
       if (!target) return;
 
@@ -1674,10 +1589,15 @@
       }
 
       if (target.hasAttribute("data-jump-tab")) {
+        const focusQuick = target.getAttribute("data-focus-quick") === "true";
         state.activeTab = target.getAttribute("data-jump-tab");
         if (target.hasAttribute("data-thought-filter")) state.thoughtFilter = target.getAttribute("data-thought-filter");
         if (target.hasAttribute("data-inv-sub")) state.investingSubtab = target.getAttribute("data-inv-sub");
         renderAll();
+        if (focusQuick) {
+          window.scrollTo({ top: 0, behavior: "auto" });
+          document.getElementById("quick-title")?.focus();
+        }
         return;
       }
 
@@ -1720,19 +1640,6 @@
         return;
       }
 
-      if (target.hasAttribute("data-Run-workflow")) {
-        const wf = target.getAttribute("data-Run-workflow");
-        const inputs = target.getAttribute("data-wf-apply") === "true" ? { apply: true } : {};
-        try {
-          showToast(`DISPATCHING WORKFLOW: ${wf}`);
-          await ghTriggerWorkflow(wf, inputs);
-          showToast(`OK — WORKFLOW STARTED: ${wf}`);
-        } catch (err) {
-          showToast(err.message);
-        }
-        return;
-      }
-
       const id = target.id;
       if (id === "brand-home") {
         state.activeTab = "triage";
@@ -1759,10 +1666,7 @@
         const next = root.getAttribute("data-market") === "kr" ? "us" : "kr";
         root.setAttribute("data-market", next);
         localStorage.setItem(STORAGE_KEYS.market, next);
-        target.textContent = `MKT: ${next.toUpperCase()} ▲`;
-      } else if (id === "btn-go-full-inbox") {
-        state.activeTab = "inbox";
-        renderAll();
+        target.textContent = `${next.toUpperCase()} ▲`;
       } else if (id === "btn-mobile-tree-toggle") {
         state.mobileTreeOpen = !state.mobileTreeOpen;
         renderAll();
@@ -1910,19 +1814,24 @@
         } catch (err) {
           showToast(err.message);
         }
-      } else if (id === "btn-inbox-submit") {
-        const kind = document.getElementById("inbox-kind")?.value || "thought_temp";
-        const title = document.getElementById("inbox-title")?.value || "";
-        const body = document.getElementById("inbox-body")?.value || "";
-        const importance = document.getElementById("inbox-importance")?.value || "일반";
-        const date = document.getElementById("inbox-date")?.value || todayStr();
-        const source = document.getElementById("inbox-source")?.value || "시그마 웹 수집함";
-        const summary = document.getElementById("inbox-summary")?.value || "";
+      } else if (id === "btn-dispatch-workflows") {
+        const workflows = [
+          { file: "sigma-inbox-sync.yml", inputs: { apply: true } },
+          { file: "sigma-macro-sync.yml", inputs: {} },
+          { file: "sigma-ir-sync.yml", inputs: {} },
+          { file: "sigma-sec-wiki.yml", inputs: {} },
+        ];
         try {
-          await saveNewInboxNote(kind, title, body, { importance, date, source, summary });
-          await openNote(buildNewNotePayload(kind, title, body, { importance, date, source, summary }).path);
+          target.disabled = true;
+          showToast("DISPATCHING WORKFLOWS...");
+          for (const wf of workflows) {
+            await ghTriggerWorkflow(wf.file, wf.inputs);
+          }
+          showToast(`OK — WORKFLOWS DISPATCHED (${workflows.length})`);
         } catch (err) {
           showToast(err.message);
+        } finally {
+          target.disabled = false;
         }
       } else if (id === "btn-upload-clippings") {
         const input = document.getElementById("clipping-file-input");
@@ -1930,16 +1839,27 @@
           showToast("ERROR — 업로드할 .md 파일을 선택하십시오.");
           return;
         }
-        for (const file of input.files) {
-          const text = await file.text();
-          const relPath = `Clippings/${file.name}`;
-          upsertNoteInMemory(relPath, text);
-          if (state.token) {
-            await ghPutFile(relPath, text, `feat(clippings): upload ${file.name} via Sigma OS Web`);
+        try {
+          target.disabled = true;
+          const count = input.files.length;
+          for (const file of input.files) {
+            const buf = await file.arrayBuffer();
+            const rawBytes = new Uint8Array(buf);
+            const text = new TextDecoder().decode(rawBytes);
+            const relPath = `Clippings/${file.name}`;
+            upsertNoteInMemory(relPath, text);
+            if (state.token) {
+              await ghPutFileBase64(relPath, bytesToB64(rawBytes), `feat(clippings): upload ${file.name} via Sigma OS Web`);
+            }
           }
+          input.value = "";
+          renderAll();
+          showToast(`OK — UPLOADED ${count} CLIPPING(S)`);
+        } catch (err) {
+          showToast(err.message);
+        } finally {
+          target.disabled = false;
         }
-        renderAll();
-        showToast(`OK — UPLOADED ${input.files.length} CLIPPING(S)`);
       } else if (id === "btn-toggle-edit") {
         state.editingNote = !state.editingNote;
         renderAll();
@@ -2049,6 +1969,15 @@
     });
 
     document.addEventListener("change", async (e) => {
+      if (e.target.id === "clipping-file-input") {
+        const lbl = document.getElementById("label-choose-clippings");
+        const files = e.target.files;
+        if (lbl) {
+          lbl.textContent = files && files.length ? `파일 선택 (${files.length})` : "파일 선택";
+          lbl.title = files && files.length ? Array.from(files).map((f) => f.name).join(", ") : "";
+        }
+        return;
+      }
       if (e.target.id === "split-right-select") {
         if (window.SIGMA_V2) {
           window.SIGMA_V2.state.splitRightPath = e.target.value;
@@ -2099,7 +2028,7 @@
     document.documentElement.setAttribute("data-theme", savedTheme);
     document.documentElement.setAttribute("data-market", savedMarket);
     const mktBtn = document.getElementById("btn-market-toggle");
-    if (mktBtn) mktBtn.textContent = `MKT: ${savedMarket.toUpperCase()} ▲`;
+    if (mktBtn) mktBtn.textContent = `${savedMarket.toUpperCase()} ▲`;
     bindEvents();
     loadVaultData();
   }
