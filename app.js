@@ -29,6 +29,7 @@
     editingNote: false,
     collapsedFolders: { "7. Template": true },
     historyStack: [],
+    selectedClippingFiles: [],
   };
 
   /* -------------------- Utilities -------------------- */
@@ -852,11 +853,62 @@
     `;
   }
 
+  function renderSelectedClippingsMarkup() {
+    if (!state.selectedClippingFiles.length) return "";
+    const chips = state.selectedClippingFiles
+      .map(
+        (file, idx) =>
+          `<span class="quick-file-chip" title="${esc(file.name)}">
+            <span class="quick-file-chip__name">${esc(file.name)}</span>
+            <button type="button" class="quick-file-chip__rm" data-remove-clip-idx="${idx}" aria-label="${esc(file.name)} 취소">✕</button>
+          </span>`
+      )
+      .join("");
+    return `${chips}<button type="button" class="ob-btn ob-btn--xs quick-file-clear-btn" id="btn-clear-clippings">선택 취소</button>`;
+  }
+
+  function syncSelectedClippingsUI() {
+    const lbl = document.getElementById("label-choose-clippings");
+    const count = state.selectedClippingFiles.length;
+    if (lbl) {
+      lbl.textContent = count ? `파일 선택 (${count})` : "파일 선택";
+      lbl.title = count ? state.selectedClippingFiles.map((f) => f.name).join(", ") : "";
+    }
+    const bar = document.getElementById("quick-selected-files");
+    if (bar) {
+      bar.innerHTML = renderSelectedClippingsMarkup();
+      bar.hidden = count === 0;
+    }
+  }
+
+  function deriveMemoTitle(body) {
+    const firstLine =
+      String(body || "")
+        .split(/\r?\n/)
+        .map((l) => l.replace(/^[#>*\-\s]+/, "").trim())
+        .find((l) => l.length > 0) || "";
+    let base = firstLine
+      .replace(/[\\/:*?"<>|]/g, "-")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 40)
+      .replace(/[.\s]+$/, "");
+    if (!base) base = `메모 ${todayStr()}`;
+    let candidate = base;
+    let n = 2;
+    while (state.byPath[`0. Inbox/${candidate}.md`]) {
+      candidate = `${base} ${n}`;
+      n += 1;
+    }
+    return candidate;
+  }
+
   /* 1. Triage / Home View (Integrated Minimal Quick Sigma Inbox) */
   function renderTriageView() {
     const latestDaily = state.notes
       .filter((n) => n.top_folder === "1. Daily Note")
       .sort((a, b) => b.name.localeCompare(a.name))[0];
+    const clipCount = state.selectedClippingFiles.length;
 
     return `
       <!-- Minimal Quick Sigma Inbox -->
@@ -868,22 +920,12 @@
           </div>
         </div>
         <div class="ob-card__body">
-          <div class="quick-row--top">
-            <select id="quick-kind" class="select quick-kind-select" aria-label="노트 종류">
-              <option value="thought_temp">임시 생각</option>
-              <option value="thought_perm">영구 생각</option>
-              <option value="reference">참고 노트</option>
-              <option value="task">할 일</option>
-              <option value="schedule">일정</option>
-              <option value="inbox">메모</option>
-            </select>
-            <input type="text" id="quick-title" class="input quick-title-input" placeholder="제목" aria-label="제목" />
-          </div>
-          <textarea id="quick-body" class="textarea quick-body-textarea" placeholder="내용" aria-label="내용"></textarea>
+          <textarea id="quick-body" class="textarea quick-body-textarea" placeholder="메모" aria-label="메모"></textarea>
+          <div id="quick-selected-files" class="quick-selected-files"${clipCount ? "" : " hidden"}>${renderSelectedClippingsMarkup()}</div>
           <div class="quick-toolbar">
             <div class="quick-clip-group">
               <input type="file" id="clipping-file-input" accept=".md,text/markdown" multiple class="quick-file-hidden" aria-label="클리핑 파일 선택" />
-              <label for="clipping-file-input" class="ob-btn ob-btn--sm" id="label-choose-clippings">파일 선택</label>
+              <label for="clipping-file-input" class="ob-btn ob-btn--sm" id="label-choose-clippings">${clipCount ? `파일 선택 (${clipCount})` : "파일 선택"}</label>
               <button type="button" class="ob-btn ob-btn--sm" id="btn-upload-clippings">클리핑 업로드</button>
             </div>
             <div class="quick-action-group">
@@ -1545,9 +1587,20 @@
   function bindEvents() {
     document.addEventListener("click", async (e) => {
       const target = e.target.closest(
-        "[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-chart-ticker],[data-chart-idx],[data-graph-depth],[data-cal-date],button"
+        "[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-chart-ticker],[data-chart-idx],[data-graph-depth],[data-cal-date],[data-remove-clip-idx],button"
       );
       if (!target) return;
+
+      if (target.hasAttribute("data-remove-clip-idx")) {
+        const idx = parseInt(target.getAttribute("data-remove-clip-idx"), 10);
+        if (!Number.isNaN(idx) && idx >= 0 && idx < state.selectedClippingFiles.length) {
+          state.selectedClippingFiles.splice(idx, 1);
+          const input = document.getElementById("clipping-file-input");
+          if (input && state.selectedClippingFiles.length === 0) input.value = "";
+          syncSelectedClippingsUI();
+        }
+        return;
+      }
 
       if (target.hasAttribute("data-chart-ticker")) {
         if (window.SIGMA_V2) {
@@ -1596,7 +1649,7 @@
         renderAll();
         if (focusQuick) {
           window.scrollTo({ top: 0, behavior: "auto" });
-          document.getElementById("quick-title")?.focus();
+          document.getElementById("quick-body")?.focus();
         }
         return;
       }
@@ -1804,16 +1857,24 @@
           showToast(`OK — DAILY NOTE SAVED (${dStr})`);
         }
       } else if (id === "btn-quick-save") {
-        const kind = document.getElementById("quick-kind")?.value || "thought_temp";
-        const title = document.getElementById("quick-title")?.value || "";
-        const body = document.getElementById("quick-body")?.value || "";
+        const bodyEl = document.getElementById("quick-body");
+        const body = (bodyEl?.value || "").trim();
+        if (!body) {
+          showToast("ERROR — 메모를 입력하십시오.");
+          return;
+        }
         try {
-          await saveNewInboxNote(kind, title, body);
-          if (document.getElementById("quick-title")) document.getElementById("quick-title").value = "";
+          const title = deriveMemoTitle(body);
+          await saveNewInboxNote("inbox", title, body);
           if (document.getElementById("quick-body")) document.getElementById("quick-body").value = "";
         } catch (err) {
           showToast(err.message);
         }
+      } else if (id === "btn-clear-clippings") {
+        state.selectedClippingFiles = [];
+        const input = document.getElementById("clipping-file-input");
+        if (input) input.value = "";
+        syncSelectedClippingsUI();
       } else if (id === "btn-dispatch-workflows") {
         const workflows = [
           { file: "sigma-inbox-sync.yml", inputs: { apply: true } },
@@ -1835,14 +1896,17 @@
         }
       } else if (id === "btn-upload-clippings") {
         const input = document.getElementById("clipping-file-input");
-        if (!input || !input.files || !input.files.length) {
+        const files = state.selectedClippingFiles.length
+          ? [...state.selectedClippingFiles]
+          : Array.from(input?.files || []);
+        if (!files.length) {
           showToast("ERROR — 업로드할 .md 파일을 선택하십시오.");
           return;
         }
         try {
           target.disabled = true;
-          const count = input.files.length;
-          for (const file of input.files) {
+          const count = files.length;
+          for (const file of files) {
             const buf = await file.arrayBuffer();
             const rawBytes = new Uint8Array(buf);
             const text = new TextDecoder().decode(rawBytes);
@@ -1852,7 +1916,8 @@
               await ghPutFileBase64(relPath, bytesToB64(rawBytes), `feat(clippings): upload ${file.name} via Sigma OS Web`);
             }
           }
-          input.value = "";
+          state.selectedClippingFiles = [];
+          if (input) input.value = "";
           renderAll();
           showToast(`OK — UPLOADED ${count} CLIPPING(S)`);
         } catch (err) {
@@ -1970,12 +2035,12 @@
 
     document.addEventListener("change", async (e) => {
       if (e.target.id === "clipping-file-input") {
-        const lbl = document.getElementById("label-choose-clippings");
-        const files = e.target.files;
-        if (lbl) {
-          lbl.textContent = files && files.length ? `파일 선택 (${files.length})` : "파일 선택";
-          lbl.title = files && files.length ? Array.from(files).map((f) => f.name).join(", ") : "";
+        const picked = Array.from(e.target.files || []);
+        if (picked.length) {
+          state.selectedClippingFiles = picked;
         }
+        e.target.value = "";
+        syncSelectedClippingsUI();
         return;
       }
       if (e.target.id === "split-right-select") {
