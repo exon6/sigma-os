@@ -267,9 +267,33 @@
         state.byName[n.name] = n;
       }
     }
+    applyLocalEditsFromStorage();
   }
 
-  function upsertNoteInMemory(relPath, rawMarkdown) {
+  function applyLocalEditsFromStorage() {
+    try {
+      const raw = localStorage.getItem("sigma_web_local_edits_v1");
+      if (!raw) return;
+      const map = JSON.parse(raw);
+      if (!map || typeof map !== "object") return;
+      for (const [relPath, mdText] of Object.entries(map)) {
+        if (typeof mdText === "string") {
+          upsertNoteInMemory(relPath, mdText, false);
+        }
+      }
+    } catch (_) {}
+  }
+
+  function saveLocalEditToStorage(relPath, rawMarkdown) {
+    try {
+      const raw = localStorage.getItem("sigma_web_local_edits_v1");
+      const map = raw ? JSON.parse(raw) : {};
+      map[relPath] = rawMarkdown;
+      localStorage.setItem("sigma_web_local_edits_v1", JSON.stringify(map));
+    } catch (_) {}
+  }
+
+  function upsertNoteInMemory(relPath, rawMarkdown, persistLocal = true) {
     const parts = relPath.split("/");
     const name = parts[parts.length - 1].replace(/\.md$/i, "");
     const folder = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
@@ -299,78 +323,64 @@
     }
     state.byPath[relPath] = note;
     state.byName[name] = note;
+    if (persistLocal) {
+      saveLocalEditToStorage(relPath, rawMarkdown);
+    }
     return note;
-  }
-
-  async function checkCloudAuthVault() {
-    try {
-      const res = await fetch("./auth-vault.json", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.ct && data.salt && data.iv) {
-          state.cloudVaultEnc = JSON.stringify(data);
-        }
-      }
-    } catch (_) {}
   }
 
   async function loadVaultData() {
     const badge = document.getElementById("connection-badge");
-    await checkCloudAuthVault();
+    if (badge) badge.textContent = "LOADING...";
 
-    // 1. If GitHub token is present in localStorage/sessionStorage, auto-login immediately!
-    if (state.token) {
-      try {
-        if (badge) badge.textContent = "SYNCING...";
-        const rawJson = await ghGetFileRaw(".sigma-sync/vault-index.json");
-        const parsed = JSON.parse(rawJson);
-        indexNotes(parsed);
-        state.mode = "github";
-        if (badge) badge.textContent = `PRIVATE LIVE · ${state.notes.length} NOTES`;
-        renderAll();
-        return;
-      } catch (err) {
-        console.warn("GitHub index fetch fallback:", err);
-      }
-    }
-
-    // 2. Try local relative vault-index.json (when served from local vault preview)
-    for (const candidate of ["../../.sigma-sync/vault-index.json", "./vault-index.json"]) {
+    // 1. Always load bundled ./vault-index.json or local ../../.sigma-sync/vault-index.json immediately (ZERO PAT / ZERO PASSWORD!)
+    for (const candidate of ["./vault-index.json", "../../.sigma-sync/vault-index.json"]) {
       try {
         const res = await fetch(candidate, { cache: "no-store" });
         if (res.ok) {
           const parsed = await res.json();
           indexNotes(parsed);
-          state.mode = state.token ? "github" : "local";
+          state.mode = "ready";
           if (badge) {
-            badge.textContent = state.token
-              ? `GITHUB + LOCAL · ${state.notes.length} NOTES`
-              : `LOCAL PREVIEW · ${state.notes.length} NOTES`;
+            badge.textContent = `LIVE · ${state.notes.length} NOTES`;
           }
           renderAll();
-          return;
+          break;
         }
       } catch (_) {}
     }
 
-    // 3. Otherwise locked (hosted on public GitHub Pages without unlocked token on this device yet)
-    state.mode = "locked";
-    if (badge) badge.textContent = "LOCKED ■";
+    // 2. If GitHub token happens to be configured, silently refresh latest index in background
+    if (state.token) {
+      try {
+        const rawJson = await ghGetFileRaw(".sigma-sync/vault-index.json");
+        const parsed = JSON.parse(rawJson);
+        indexNotes(parsed);
+        state.mode = "github";
+        if (badge) badge.textContent = `LIVE · ${state.notes.length} NOTES`;
+        renderAll();
+        return;
+      } catch (_) {}
+    }
+
+    state.mode = "ready";
     renderAll();
   }
 
   async function ensureFullNoteBody(note) {
     if (!note || !note.truncated) return;
-    try {
-      const localRes = await fetch(`../../${encodeRepoPath(note.path)}`, { cache: "no-store" });
-      if (localRes.ok) {
-        const raw = await localRes.text();
-        const { body } = parseFrontmatterJS(raw);
-        note.body = body;
-        note.truncated = false;
-        return;
-      }
-    } catch (_) {}
+    for (const prefix of ["./", "../../"]) {
+      try {
+        const localRes = await fetch(`${prefix}${encodeRepoPath(note.path)}`, { cache: "no-store" });
+        if (localRes.ok) {
+          const raw = await localRes.text();
+          const { body } = parseFrontmatterJS(raw);
+          note.body = body;
+          note.truncated = false;
+          return;
+        }
+      } catch (_) {}
+    }
     if (state.token) {
       const raw = await ghGetFileRaw(note.path);
       const { body } = parseFrontmatterJS(raw);
@@ -1499,9 +1509,9 @@
     if (state.token) {
       showToast(`COMMITTING: ${payload.path}`);
       await ghPutFile(payload.path, payload.content, `feat(inbox): add ${payload.path} via Sigma OS Web`);
-      showToast(`OK — COMMITTED: ${payload.path}`);
+      showToast(`OK — SAVED: ${payload.path}`);
     } else {
-      showToast(`SAVED IN MEMORY — 영구 커밋은 상단 [AUTH ■]에 토큰을 등록하십시오.`);
+      showToast(`OK — SAVED: ${payload.path}`);
     }
   }
 
@@ -1808,12 +1818,12 @@
           try {
             showToast(`COMMITTING ${targetPath}...`);
             await ghPutFile(targetPath, newRaw, `docs(vault): update ${targetPath} via Sigma OS Split Pane`);
-            showToast(`OK — COMMITTED: ${targetPath}`);
+            showToast(`OK — SAVED: ${targetPath}`);
           } catch (err) {
             showToast(err.message);
           }
         } else {
-          showToast("SAVED IN MEMORY — 영구 커밋은 상단 [AUTH ■] 토큰 필요");
+          showToast(`OK — SAVED: ${targetPath}`);
         }
       } else if (id === "btn-cal-prev" || id === "btn-cal-next") {
         if (window.SIGMA_V2) {
@@ -1887,7 +1897,7 @@
             showToast(err.message);
           }
         } else {
-          showToast("SAVED IN MEMORY — 영구 커밋은 상단 [AUTH ■] 토큰 필요");
+          showToast(`OK — DAILY NOTE SAVED (${dStr})`);
         }
       } else if (id === "btn-quick-save") {
         const kind = document.getElementById("quick-kind")?.value || "thought_temp";
@@ -1956,12 +1966,12 @@
           try {
             showToast("COMMITTING TO VAULT...");
             await ghPutFile(state.currentNotePath, newRaw, `docs(vault): update ${state.currentNotePath} via Sigma OS Web`);
-            showToast("OK — COMMITTED TO VAULT");
+            showToast("OK — SAVED TO VAULT");
           } catch (err) {
             showToast(err.message);
           }
         } else {
-          showToast("SAVED IN MEMORY — 영구 커밋은 상단 [AUTH ■]에 토큰 필요");
+          showToast("OK — SAVED");
         }
       } else if (id === "btn-load-full-clipping") {
         const note = state.byPath[state.currentNotePath];
@@ -2052,6 +2062,7 @@
         if (!note) return;
         note.props.done = e.target.checked;
         const newRaw = serializeFrontmatterJS(note.props, note.body);
+        saveLocalEditToStorage(path, newRaw);
         renderAll();
         if (state.token) {
           try {
@@ -2060,6 +2071,8 @@
           } catch (err) {
             showToast(err.message);
           }
+        } else {
+          showToast(`OK — TASK UPDATED: ${note.name}`);
         }
       }
     });
