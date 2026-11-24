@@ -575,11 +575,11 @@
     function draw() {
       const isLight = isLightTheme();
       ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = isLight ? "#ffffff" : "#011d1c";
+      ctx.fillStyle = isLight ? "#ffffff" : "#0f172a";
       ctx.fillRect(0, 0, W, H);
 
       // Subtle grid
-      ctx.strokeStyle = isLight ? "#e8efee" : "#0f4a46";
+      ctx.strokeStyle = isLight ? "#e2e8f0" : "#1e293b";
       ctx.lineWidth = 1;
       for (let gx = 40; gx < W; gx += 60) {
         ctx.beginPath();
@@ -600,8 +600,8 @@
         const t = byId[e.target];
         if (!s || !t) return;
         const active = hoverNode && (hoverNode.id === s.id || hoverNode.id === t.id);
-        ctx.strokeStyle = active ? (isLight ? "#011d1c" : "#edfffe") : isLight ? "#9bb0ad" : "#1f6b65";
-        ctx.lineWidth = active ? 2.4 : 1.3;
+        ctx.strokeStyle = active ? (isLight ? "#1d4ed8" : "#38bdf8") : isLight ? "#94a3b8" : "#475569";
+        ctx.lineWidth = active ? 2.5 : 1.4;
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
         ctx.lineTo(t.x, t.y);
@@ -614,12 +614,12 @@
         const isHover = hoverNode && hoverNode.id === n.id;
         ctx.fillStyle = n.color;
         ctx.fillRect(n.x - sz / 2, n.y - sz / 2, sz, sz);
-        ctx.strokeStyle = isHover ? "#7c3aed" : isLight ? "#011d1c" : "#011d1c";
+        ctx.strokeStyle = isHover ? "#2563eb" : isLight ? "#0f172a" : "#ffffff";
         ctx.lineWidth = isHover ? 3 : 2;
         ctx.strokeRect(n.x - sz / 2, n.y - sz / 2, sz, sz);
 
         ctx.font = n.hop === 0 ? '700 12px "Space Mono", sans-serif' : '600 11px "Work Sans", "Pretendard", sans-serif';
-        ctx.fillStyle = isLight ? "#011d1c" : n.hop === 0 ? "#fde9ff" : "#edfffe";
+        ctx.fillStyle = isLight ? "#0f172a" : n.hop === 0 ? "#38bdf8" : "#f8fafc";
         ctx.textAlign = "center";
         ctx.fillText(n.label, n.x, n.y + sz / 2 + 13);
       });
@@ -809,14 +809,14 @@
               <div class="ob-cal-grid">${cellsHtml.join("")}</div>
               <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-family:var(--font-mono);font-size:11px;color:var(--muted);">
                 <span>범례:</span>
-                <span><strong style="color:var(--up);">■ 3/3 달성</strong></span>
-                <span><strong>■ 2/3 달성</strong></span>
-                <span>■ 1/3 달성</span>
+                <span><strong style="color:#047857;">■ 3/3 달성</strong></span>
+                <span><strong style="color:#0284c7;">■ 2/3 달성</strong></span>
+                <span><strong style="color:#d97706;">■ 1/3 달성</strong></span>
                 <span>● 데일리 노트 존재 (AGENTS.md 규칙: 미입력 습관은 추정하지 않고 실제 값만 표시)</span>
               </div>
             </div>
 
-            <div style="background:var(--deep);border:3px solid var(--frame);padding:16px;">
+            <div style="background:var(--surface);border:2px solid var(--frame);border-left:5px solid #059669;padding:16px;">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--frame);">
                 <strong class="ob-mono" style="font-size:15px;color:var(--ink);">📅 ${esc(v2State.calSelectedDate)} 데일리 점검 · 회고</strong>
                 ${

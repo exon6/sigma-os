@@ -487,7 +487,7 @@
         rows.map((n) => {
           const tkr = String(n.props.ticker || n.name.split(" ")[0]);
           return [
-            `<div style="display:flex;align-items:center;gap:10px;"><span class="ob-ticker">${esc(tkr.slice(0, 4))}</span><div>${noteLinkHTML(n.path, n.name)}</div></div>`,
+            `<div style="display:flex;align-items:center;gap:10px;"><span class="ob-ticker" data-ticker="${esc(tkr)}">${esc(tkr)}</span><div>${noteLinkHTML(n.path, n.name)}</div></div>`,
             esc(n.props.sector || "−"),
             `<span class="ob-mono">${esc(n.props.next_review || "−")}</span>`,
             esc(n.props.question || "−"),
@@ -1091,7 +1091,7 @@
           <div class="ob-card" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:space-between;">
             <div class="ob-card__head">
               <div style="display:flex;align-items:center;gap:10px;">
-                <span class="ob-ticker">${esc(ticker)}</span>
+                <span class="ob-ticker" data-ticker="${esc(ticker)}">${esc(ticker)}</span>
                 <span>${esc(s.name)}</span>
               </div>
               <span class="ob-badge ob-badge--low">${esc(s.props.position || "HOLDING")}</span>
