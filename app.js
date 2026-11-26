@@ -21,6 +21,7 @@
     safeWriteMode: localStorage.getItem(STORAGE_KEYS.safeWrite) !== "false",
     cloudVaultEnc: null, // Loaded from ./auth-vault.json if present on GitHub Pages
     mode: "loading", // "local" | "github" | "locked"
+    lastAuthError: "",
     generatedAt: "",
     notes: [],
     byPath: {},
@@ -443,13 +444,20 @@
         const parsed = JSON.parse(rawJson);
         indexNotes(parsed);
         state.mode = "github";
+        state.lastAuthError = "";
         loadedAny = true;
         if (badge) badge.textContent = `LIVE · ${state.notes.length} NOTES`;
         renderAll();
         return;
       } catch (err) {
+        const msg = String(err && err.message ? err.message : err || "Unknown auth error");
+        let hint = "";
+        if (msg.includes("(401)")) hint = " [토큰이 만료되었거나 오타가 있습니다]";
+        else if (msg.includes("(403)")) hint = " [Fine-grained PAT에 Contents: Read and write 권한이 필요합니다]";
+        else if (msg.includes("(404)")) hint = ` [PAT에 '${state.repo}' 저장소 접근 권한이 포함되어 있는지 확인하세요]`;
+        state.lastAuthError = `${msg}${hint}`;
         if (badge) badge.textContent = "AUTH ERROR";
-        showToast(err.message || "ERROR — 비공개 볼트 연결에 실패했습니다. AUTH 🔒에서 PAT 권한을 확인하세요.");
+        showToast(state.lastAuthError);
       }
     }
 
@@ -914,6 +922,13 @@
             <strong>들어갈 때마다 PAT 토큰을 입력할 필요가 없습니다.</strong><br/>
             한 번만 연결해두면 이 기기(브라우저)에 자동 저장되어 <strong>다음부터는 주소만 열면 0.5초 만에 바로 볼트로 들어갑니다.</strong> 또한 나만의 간편 비밀번호로 클라우드 금고를 저장해두면 스마트폰이나 다른 PC에서도 긴 토큰 없이 비밀번호 한 줄로 즉시 연결됩니다.
           </p>
+          ${
+            state.lastAuthError
+              ? `<div class="ob-block" style="padding:12px 14px;margin-bottom:16px;border:2px solid var(--ob-red,#d9383a);background:rgba(217,56,58,0.08);font-size:12.5px;">
+                  <strong>AUTH ERROR (${esc(state.repo)}):</strong><br/>${esc(state.lastAuthError)}
+                </div>`
+              : ""
+          }
           ${
             hasAnyEnc
               ? `<div class="ob-block ob-tone-kelp" style="padding:18px;margin-bottom:20px;">
@@ -1925,6 +1940,13 @@
         </div>
       </div>
       ${
+        state.lastAuthError
+          ? `<div class="ob-block" style="padding:12px 14px;margin-bottom:14px;border:2px solid var(--ob-red,#d9383a);background:rgba(217,56,58,0.08);font-size:12.5px;">
+              <strong>최근 연결 오류 (${esc(state.repo)}):</strong><br/>${esc(state.lastAuthError)}
+            </div>`
+          : ""
+      }
+      ${
         hasAnyEnc
           ? `<div style="margin-bottom:16px;padding:14px;background:var(--surface);border:3px solid var(--frame);">
               <strong class="label" style="display:block;margin-bottom:8px;">UNLOCK WITH PASSWORD // 간편 비밀번호로 잠금 해제</strong>
@@ -2454,30 +2476,40 @@
         const prev = state.historyStack.pop();
         if (prev) await openNote(prev, false);
       } else if (id === "btn-save-auth" || id === "btn-save-pat-direct") {
-        const repoVal = document.getElementById("modal-repo-input")?.value || state.repo;
-        const patVal = (document.getElementById("modal-pat-input")?.value || document.getElementById("auth-pat-direct")?.value || "").trim();
-        const pinVal = (document.getElementById("modal-pin-input")?.value || document.getElementById("auth-pin-setup")?.value || "").trim();
-        const expiryEl = document.getElementById("modal-pat-expiry");
+        const isModal = id === "btn-save-auth";
+        const repoVal = (isModal ? document.getElementById("modal-repo-input")?.value : state.repo) || REPO_DEFAULT;
+        const patVal = (
+          isModal
+            ? document.getElementById("modal-pat-input")?.value || ""
+            : document.getElementById("auth-pat-direct")?.value || ""
+        ).trim();
+        const pinVal = (
+          isModal
+            ? document.getElementById("modal-pin-input")?.value || ""
+            : document.getElementById("auth-pin-setup")?.value || ""
+        ).trim();
+        const expiryEl = isModal ? document.getElementById("modal-pat-expiry") : null;
         if (expiryEl) {
           state.patExpiry = expiryEl.value.trim();
           localStorage.setItem(STORAGE_KEYS.patExpiry, state.patExpiry);
         }
-        const safeWriteEl = document.getElementById("modal-safe-write");
+        const safeWriteEl = isModal ? document.getElementById("modal-safe-write") : null;
         if (safeWriteEl) {
           state.safeWriteMode = Boolean(safeWriteEl.checked);
           localStorage.setItem(STORAGE_KEYS.safeWrite, String(state.safeWriteMode));
         }
         const remember =
-          (document.getElementById("modal-remember-device")?.checked ??
-            document.getElementById("auth-remember-direct")?.checked ??
-            true) === true;
+          (isModal
+            ? document.getElementById("modal-remember-device")?.checked
+            : document.getElementById("auth-remember-direct")?.checked) ?? true;
 
         if (!patVal) {
           showToast("ERROR — GitHub PAT 토큰을 입력하십시오.");
           return;
         }
-        state.repo = repoVal.trim();
+        state.repo = repoVal.trim() || REPO_DEFAULT;
         state.token = patVal;
+        state.lastAuthError = "";
         localStorage.setItem(STORAGE_KEYS.repo, state.repo);
         sessionStorage.setItem(STORAGE_KEYS.tokenPlain, patVal);
 
@@ -2496,7 +2528,9 @@
 
         document.getElementById("auth-modal")?.classList.remove("open");
         await loadVaultData();
-        showToast("OK — PRIVATE VAULT CONNECTED (AUTO-LOGIN ENABLED)");
+        if (state.mode === "github") {
+          showToast("OK — PRIVATE VAULT CONNECTED (AUTO-LOGIN ENABLED)");
+        }
       } else if (id === "btn-unlock-pin" || id === "btn-modal-unlock") {
         const pinVal = (document.getElementById("unlock-pin-input")?.value || document.getElementById("modal-unlock-pin")?.value || "").trim();
         const enc = localStorage.getItem(STORAGE_KEYS.tokenEnc) || state.cloudVaultEnc;
@@ -2511,16 +2545,23 @@
           }
           document.getElementById("auth-modal")?.classList.remove("open");
           await loadVaultData();
-          showToast("OK — VAULT UNLOCKED");
+          if (state.mode === "github") {
+            showToast("OK — VAULT UNLOCKED");
+          }
         } catch (_) {
           showToast("ERROR — 비밀번호가 일치하지 않습니다.");
         }
       } else if (id === "btn-clear-auth") {
         state.token = "";
+        state.repo = REPO_DEFAULT;
+        state.lastAuthError = "";
         sessionStorage.removeItem(STORAGE_KEYS.tokenPlain);
         localStorage.removeItem(STORAGE_KEYS.tokenPlain);
         localStorage.removeItem(STORAGE_KEYS.tokenEnc);
+        localStorage.removeItem(STORAGE_KEYS.repo);
         document.getElementById("auth-modal")?.classList.remove("open");
+        const modalBody = document.getElementById("auth-modal-body");
+        if (modalBody) modalBody.innerHTML = "";
         await loadVaultData();
         showToast("LOGGED OUT — 연결 정보가 초기화되었습니다.");
       }
