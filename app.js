@@ -1257,6 +1257,264 @@
     `;
   }
 
+  /* -------------------- Valuation & Global Macro Desk Panel -------------------- */
+  function getValuationRows() {
+    return state.notes
+      .filter((n) => n.props && n.props.type === "valuation" && n.props.ticker)
+      .map((n) => {
+        const tkr = String(n.props.ticker || "").toUpperCase();
+        const cur = Number(n.props.current_price) || 0;
+        const iv = Number(n.props.intrinsic_value) || 0;
+        const p25 = Number(n.props.mc_p25) || iv * 0.85;
+        const p75 = Number(n.props.mc_p75) || iv * 1.15;
+        const mos = Number(n.props.mos_pct);
+        const prob = Number(n.props.prob_undervalued);
+        const wacc = Number(n.props.wacc_init);
+        const isHolding = Boolean(state.byPath[`6. Resources/Stocks/${tkr} 투자 논리.md`]);
+        return {
+          note: n,
+          ticker: tkr,
+          company: String(n.props.company || tkr),
+          sector: String(n.props.sector || "−"),
+          model: String(n.props.model || "FCFF Ginzu"),
+          cur,
+          iv,
+          p25,
+          p75,
+          mos: Number.isFinite(mos) ? mos : 0,
+          prob: Number.isFinite(prob) ? prob : 0,
+          wacc: Number.isFinite(wacc) ? wacc : 0,
+          signal: String(n.props.signal || ""),
+          updated: String(n.props.updated || n.mtime || ""),
+          isHolding,
+          storyPath: state.byPath[`10. Equity Desk/03_Tickers/${tkr}/${tkr}_Story.md`]
+            ? `10. Equity Desk/03_Tickers/${tkr}/${tkr}_Story.md`
+            : "",
+          logPath: state.byPath[`10. Equity Desk/03_Tickers/${tkr}/${tkr}_Decision_Log.md`]
+            ? `10. Equity Desk/03_Tickers/${tkr}/${tkr}_Decision_Log.md`
+            : "",
+          thesisPath: state.byPath[`6. Resources/Stocks/${tkr} 투자 논리.md`]
+            ? `6. Resources/Stocks/${tkr} 투자 논리.md`
+            : "",
+        };
+      })
+      .sort((a, b) => b.mos - a.mos);
+  }
+
+  function getMacroPulseNote() {
+    return (
+      state.byPath["10. Equity Desk/01_Macro_Desk/US_Macro_Pulse.md"] ||
+      state.notes.find((n) => n.props && n.props.type === "macro_pulse") ||
+      null
+    );
+  }
+
+  function renderValuationSignalBadge(mos, prob) {
+    if (mos >= 20 && prob >= 70) return `<span class="ob-badge ob-badge--low">BUY · 안전마진</span>`;
+    if (mos >= 0) return `<span class="ob-badge ob-badge--warning">HOLD · 적정근접</span>`;
+    return `<span class="ob-badge ob-badge--down">PASS · 고평가</span>`;
+  }
+
+  function renderValuationRangeBar(cur, iv, p25, p75) {
+    const lo = Math.min(cur, p25, iv) * 0.85;
+    const hi = Math.max(cur, p75, iv) * 1.1;
+    const span = Math.max(hi - lo, 1);
+    const pct = (v) => Math.max(0, Math.min(100, ((v - lo) / span) * 100));
+    const leftBand = pct(p25);
+    const widthBand = Math.max(4, pct(p75) - leftBand);
+    const ivPos = pct(iv);
+    const curPos = pct(cur);
+    const isUnder = iv >= cur;
+    return `
+      <div class="val-range" title="파란 구간: 몬테카를로 P25~P75 ($${p25.toFixed(0)}~$${p75.toFixed(0)}) / 수직선: 현재가 $${cur.toFixed(2)} vs 내재가치 $${iv.toFixed(2)}">
+        <div class="val-range__track">
+          <div class="val-range__band" style="left:${leftBand.toFixed(1)}%;width:${widthBand.toFixed(1)}%;"></div>
+          <div class="val-range__iv" style="left:${ivPos.toFixed(1)}%;"></div>
+          <div class="val-range__pin ${isUnder ? "is-under" : ""}" style="left:${curPos.toFixed(1)}%;"></div>
+        </div>
+        <div class="val-range__labels">
+          <span>$${p25.toFixed(0)}</span>
+          <span>P25–P75</span>
+          <span>$${p75.toFixed(0)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderValuationModelGuide(openByDefault = false) {
+    return `
+      <details class="val-guide-details" ${openByDefault ? "open" : ""}>
+        <summary>
+          <span>MODEL ARCHITECTURE // 다모다란 FCFF 가치평가 &amp; 마틴센 3시장 거시 모델 한눈에 보기</span>
+          <span class="ob-mono" style="font-size:11px;color:var(--muted);">CLICK TO TOGGLE ▾</span>
+        </summary>
+        <div class="val-guide-body">
+          <div style="font-size:12.5px;color:var(--body);margin-bottom:10px;line-height:1.55;">
+            <strong>핵심 원리:</strong> 마틴센 3시장 거시 엔진(FRED 실시간)이 산출한 <strong>무위험이자율(Rf)</strong>과 <strong>스트레스 보정 위험프리미엄(ERP)</strong>이 <code>market_params.yaml</code>로 자동 전달되고, 다모다란 FCFF Ginzu 엔진이 SEC 10-K/10-Q/424B4 원문 수치로 전 종목 내재가치와 5,000회 몬테카를로 분포를 산출합니다. <em>(매매 판단은 사용자 결정)</em>
+          </div>
+          <div class="val-pipeline-grid">
+            <div class="val-pipeline-step">
+              <div class="val-pipeline-step__num">STEP 01 // MACRO → WACC BRIDGE</div>
+              <div class="val-pipeline-step__title">마틴센 3시장 거시 &amp; 자동 할인율</div>
+              <div class="val-pipeline-step__desc">재화·신용·외환 3시장과 대침체 스트레스 점수(0~100)를 진단해 Rf(미10Y)와 스트레스 보정 ERP(+0~1%p)를 전 종목 할인율에 자동 연동합니다.</div>
+            </div>
+            <div class="val-pipeline-step">
+              <div class="val-pipeline-step__num">STEP 02 // ACCOUNTING CLEANUP</div>
+              <div class="val-pipeline-step__title">R&amp;D 자산화 · SBC 엄격 반영</div>
+              <div class="val-pipeline-step__desc">과거 4~5년 R&amp;D를 연구자산으로 자본화해 진짜 영업이익을 산출하고, 주식기반보상(SBC)은 비용에서 빼지 않고 주주 부담으로 그대로 유지합니다.</div>
+            </div>
+            <div class="val-pipeline-step">
+              <div class="val-pipeline-step__num">STEP 03 // COST OF CAPITAL</div>
+              <div class="val-pipeline-step__title">상향식 베타 · 합성 신용등급 WACC</div>
+              <div class="val-pipeline-step__desc">업종 무부채 베타 + 부채비율로 자기자본비용을, 이자보상배율(ICR) 합성 신용등급으로 타인자본비용을 계산해 6~10년 차 성숙기 WACC로 수렴시킵니다.</div>
+            </div>
+            <div class="val-pipeline-step">
+              <div class="val-pipeline-step__num">STEP 04 // 10Y FCFF &amp; TERMINAL</div>
+              <div class="val-pipeline-step__title">10년 현금흐름 · 재투자 · 잔존가치</div>
+              <div class="val-pipeline-step__desc">3P(가능·타당·개연) 스토리 가정으로 10년 세후영업이익에서 매출증가분÷자본효율(Sales/Cap) 재투자를 차감하고, 성숙기 ROIC 기반 영구가치를 합산합니다.</div>
+            </div>
+            <div class="val-pipeline-step">
+              <div class="val-pipeline-step__num">STEP 05 // EQUITY BRIDGE</div>
+              <div class="val-pipeline-step__title">현금 · 비영업자산 · 부채 브리지</div>
+              <div class="val-pipeline-step__desc">영업가치(실패확률 반영) + 현금 + 비영업 지분투자(NVDA·GOOGL 등) − 총부채(리스 포함) − 스톡옵션을 보통주 수로 나눠 주당 내재가치를 도출합니다.</div>
+            </div>
+            <div class="val-pipeline-step">
+              <div class="val-pipeline-step__num">STEP 06 // MONTE CARLO 5,000x</div>
+              <div class="val-pipeline-step__title">확률 분포 &amp; 안전마진 시그널</div>
+              <div class="val-pipeline-step__desc">성장률·마진·자본효율·베타를 5,000회 시뮬레이션해 P25~P75 분포와 저평가확률을 계산합니다. <strong>BUY:</strong> MOS ≥ +20% &amp; 저평가확률 ≥ 70%.</div>
+            </div>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+  function renderValuationDeskPanel(opts = {}) {
+    const compact = Boolean(opts.compact);
+    const rows = getValuationRows();
+    const macro = getMacroPulseNote();
+    if (!rows.length && !macro) return "";
+
+    const mp = macro ? macro.props || {} : {};
+    const regime = mp.regime || "−";
+    const asZone = String(mp.as_zone || "−").split("(")[0].trim();
+    const stressScore = mp.stress_score !== undefined ? Number(mp.stress_score) : null;
+    const stressLevel = mp.stress_level || "−";
+    const rfVal = mp.rf_us10y !== undefined ? `${Number(mp.rf_us10y).toFixed(2)}%` : "−";
+    const erpVal = mp.erp_recommended !== undefined ? `${Number(mp.erp_recommended).toFixed(2)}%` : "−";
+    const macroUpdated = mp.updated || (macro ? macro.mtime : "−");
+
+    const buyCount = rows.filter((r) => r.mos >= 20 && r.prob >= 70).length;
+    const holdCount = rows.filter((r) => r.mos >= 0 && !(r.mos >= 20 && r.prob >= 70)).length;
+
+    const tableRowsHtml = rows
+      .map((r) => {
+        const mosColor = r.mos >= 20 ? "var(--up)" : r.mos >= 0 ? "var(--warning)" : "var(--down)";
+        const mosStr = `${r.mos >= 0 ? "+" : ""}${r.mos.toFixed(1)}%`;
+        return `
+          <tr>
+            <td>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="ob-ticker" data-ticker="${esc(r.ticker)}">${esc(r.ticker)}</span>
+                <div>
+                  <div style="font-weight:700;color:var(--ink);">
+                    <a href="#" class="wikilink" data-note-path="${esc(r.note.path)}">${esc(r.company)}</a>
+                  </div>
+                  <div class="ob-mono" style="font-size:10.5px;color:var(--muted);">
+                    ${r.isHolding ? "보유 핵심" : "벤치마크"} · ${esc(r.sector)}
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td class="ob-mono" style="font-weight:700;">$${r.cur.toFixed(2)}</td>
+            <td class="ob-mono" style="font-weight:700;color:var(--accent-ink);">$${r.iv.toFixed(2)}</td>
+            <td>${renderValuationRangeBar(r.cur, r.iv, r.p25, r.p75)}</td>
+            <td class="ob-mono" style="font-weight:700;color:${mosColor};">${mosStr}</td>
+            <td class="ob-mono">${r.prob.toFixed(1)}%</td>
+            ${compact ? "" : `<td class="ob-mono">${r.wacc.toFixed(2)}%</td>`}
+            <td>${renderValuationSignalBadge(r.mos, r.prob)}</td>
+            <td>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                <button class="ob-btn ob-btn--xs ob-btn--primary" data-note-path="${esc(r.note.path)}">DCF</button>
+                ${r.storyPath ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(r.storyPath)}">3P스토리</button>` : ""}
+                ${!compact && r.logPath ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(r.logPath)}">로그</button>` : ""}
+                ${!compact && r.thesisPath ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(r.thesisPath)}">투자논리</button>` : ""}
+              </div>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="ob-card ${compact ? "" : "ob-card--elevated"}" style="margin-bottom:20px;">
+        <div class="ob-card__head">
+          <span>EQUITY &amp; MACRO DESK // 다모다란 가치평가 · 마틴센 3시장 거시 (${rows.length}종목 · BUY ${buyCount} · HOLD ${holdCount})</span>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${macro ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(macro.path)}">거시 리포트 →</button>` : ""}
+            ${
+              compact
+                ? `<button class="ob-btn ob-btn--xs ob-btn--primary" data-jump-tab="investing" data-inv-sub="valuation">상세 데스크 · 모델 가이드 →</button>`
+                : state.byPath["10. Equity Desk/04_Dashboards/US_Stock_Desk.md"]
+                  ? `<button class="ob-btn ob-btn--xs" data-note-path="10. Equity Desk/04_Dashboards/US_Stock_Desk.md">OBSIDIAN DESK MD</button>`
+                  : ""
+            }
+          </div>
+        </div>
+        <div class="ob-card__body">
+          <div class="val-macro-strip">
+            <div class="val-kpi-box">
+              <span class="val-kpi-box__label">MACRO REGIME (${esc(macroUpdated)})</span>
+              <span class="val-kpi-box__val">${esc(regime)}</span>
+              <span class="val-kpi-box__sub">AS 구간: ${esc(asZone)}</span>
+            </div>
+            <div class="val-kpi-box">
+              <span class="val-kpi-box__label">CREDIT STRESS (0–100)</span>
+              <span class="val-kpi-box__val">${stressScore !== null ? `${stressScore} / 100` : "−"}</span>
+              <span class="val-kpi-box__sub">${esc(stressLevel)}</span>
+            </div>
+            <div class="val-kpi-box">
+              <span class="val-kpi-box__label">US 10Y RISK-FREE (RF)</span>
+              <span class="val-kpi-box__val" style="color:var(--accent-ink);">${rfVal}</span>
+              <span class="val-kpi-box__sub">FRED 실시간 → WACC·영구성장률 상한</span>
+            </div>
+            <div class="val-kpi-box">
+              <span class="val-kpi-box__label">RECOMMENDED ERP</span>
+              <span class="val-kpi-box__val">${erpVal}</span>
+              <span class="val-kpi-box__sub">스트레스 보정 위험프리미엄 자동 연동</span>
+            </div>
+          </div>
+
+          <div class="val-table-wrap">
+            <table class="val-table">
+              <thead>
+                <tr>
+                  <th>TICKER / COMPANY</th>
+                  <th>현재가</th>
+                  <th>내재가치</th>
+                  <th>몬테카를로 P25–P75 (핀=현재가)</th>
+                  <th>안전마진</th>
+                  <th>저평가확률</th>
+                  ${compact ? "" : "<th>초기 WACC</th>"}
+                  <th>시그널</th>
+                  <th>리포트</th>
+                </tr>
+              </thead>
+              <tbody>${tableRowsHtml}</tbody>
+            </table>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;color:var(--muted);">
+            <span>※ 출처: SEC 10-K/10-Q/424B4 TTM + FRED + Damodaran FCFF Ginzu 5,000회 시뮬레이션 (최종 매매 판단은 사용자 결정)</span>
+            <span class="ob-mono">파란 구간=P25~P75 · 초록/빨강 핀=현재가 위치</span>
+          </div>
+
+          ${renderValuationModelGuide(!compact)}
+        </div>
+      </div>
+    `;
+  }
+
   /* 1. Triage / Home View */
   function renderTriageView() {
     const latestDaily = state.notes
@@ -1291,6 +1549,7 @@
       </div>
 
       ${renderConflictBanner()}
+      ${renderValuationDeskPanel({ compact: true })}
       ${renderReviewAndStalenessRadar()}
       ${window.SIGMA_V2 ? window.SIGMA_V2.renderHabitHeatmapPanel(state) : ""}
 
@@ -1410,6 +1669,24 @@
         const wikiTarget = resolveNoteLink(s.props.wiki || ticker) || (hubBucket.entity_note ? state.byPath[hubBucket.entity_note] : null);
         const callPath = (hubBucket.call_notes && hubBucket.call_notes[0]) || callSourceMap[ticker];
         const eventPath = (hubBucket.event_notes && hubBucket.event_notes[0]) || eventSourceMap[ticker];
+        const valNote = hubBucket.valuation_note ? state.byPath[hubBucket.valuation_note] : null;
+        const valMiniHtml = valNote && valNote.props
+          ? (() => {
+              const cur = Number(valNote.props.current_price) || 0;
+              const iv = Number(valNote.props.intrinsic_value) || 0;
+              const mos = Number(valNote.props.mos_pct) || 0;
+              const prob = Number(valNote.props.prob_undervalued) || 0;
+              const mosClr = mos >= 20 ? "var(--up)" : mos >= 0 ? "var(--warning)" : "var(--down)";
+              return `
+                <div class="val-stock-mini">
+                  <div class="val-stock-mini__item"><span class="val-stock-mini__k">현재가</span><span class="val-stock-mini__v">$${cur.toFixed(2)}</span></div>
+                  <div class="val-stock-mini__item"><span class="val-stock-mini__k">내재가치</span><span class="val-stock-mini__v" style="color:var(--accent-ink);">$${iv.toFixed(2)}</span></div>
+                  <div class="val-stock-mini__item"><span class="val-stock-mini__k">안전마진</span><span class="val-stock-mini__v" style="color:${mosClr};">${mos >= 0 ? "+" : ""}${mos.toFixed(1)}%</span></div>
+                  <div class="val-stock-mini__item"><span class="val-stock-mini__k">저평가확률</span><span class="val-stock-mini__v">${prob.toFixed(0)}%</span></div>
+                </div>
+              `;
+            })()
+          : "";
         return `
           <div class="ob-card" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:space-between;">
             <div class="ob-card__head">
@@ -1421,6 +1698,7 @@
             </div>
             <div class="ob-card__body" style="flex:1;display:flex;flex-direction:column;justify-content:space-between;">
               <div>
+                ${valMiniHtml}
                 <div class="ob-mono" style="font-size:12px;color:var(--muted);margin-bottom:10px;">
                   SECTOR: ${esc(s.props.sector || "−")} // NEXT REVIEW: <strong style="color:var(--ink);">${esc(s.props.next_review || "−")}</strong>
                 </div>
@@ -1441,9 +1719,18 @@
       .join("");
 
     const wikiNotes = state.notes.filter((n) => n.top_folder === "9. Wiki");
+    const valRowsCount = getValuationRows().length;
     let subContent = "";
 
-    if (state.investingSubtab === "stocks") {
+    if (state.investingSubtab === "valuation") {
+      subContent = `
+        ${renderValuationDeskPanel({ compact: false })}
+        <div class="grid-2">
+          <div>${renderQuickPreviewPanel("10. Equity Desk/01_Macro_Desk/US_Macro_Pulse.md", "MARTHINSEN 3-SECTOR MACRO PULSE // 미국 거시경제 진단")}</div>
+          <div>${renderQuickPreviewPanel("10. Equity Desk/BOOK_REFERENCES.md", "THEORY & GLOSSARY // 다모다란 · 마틴센 번역서 레퍼런스")}</div>
+        </div>
+      `;
+    } else if (state.investingSubtab === "stocks") {
       subContent = `
         <div class="grid-3" style="margin-bottom:24px;">${stockCards}</div>
         <div class="grid-2">
@@ -1510,6 +1797,7 @@
         <div class="ob-card__body">
           ${window.SIGMA_V2 ? window.SIGMA_V2.renderEarningsChartPanel() : ""}
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;">
+            <button class="ob-chip ${state.investingSubtab === "valuation" ? "is-active" : ""}" data-inv-sub="valuation">00 // 가치평가 · 거시 데스크 (${valRowsCount})</button>
             <button class="ob-chip ${state.investingSubtab === "stocks" ? "is-active" : ""}" data-inv-sub="stocks">01 // 핵심 보유 6종목 &amp; 매크로·신용</button>
             <button class="ob-chip ${state.investingSubtab === "calls" ? "is-active" : ""}" data-inv-sub="calls">02 // 어닝콜 46건 + 대형행사 2건 시계열</button>
             <button class="ob-chip ${state.investingSubtab === "wiki" ? "is-active" : ""}" data-inv-sub="wiki">03 // LLM 위키 전체 탐색 (${wikiNotes.length})</button>
