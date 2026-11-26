@@ -1185,10 +1185,12 @@
             <span><span class="ob-ticker">${esc(b.ticker)}</span> TICKER HUB // 연결 노트 총 ${b.total}건</span>
             <div style="display:flex;gap:6px;">
               ${b.stock_note ? `<button class="ob-btn ob-btn--xs ob-btn--primary" data-note-path="${esc(b.stock_note)}">투자 논리 →</button>` : ""}
+              ${b.valuation_note ? `<button class="ob-btn ob-btn--xs ob-btn--primary" data-note-path="${esc(b.valuation_note)}">다모다란 밸류에이션 →</button>` : ""}
               ${b.entity_note ? `<button class="ob-btn ob-btn--xs ob-btn--ai" data-note-path="${esc(b.entity_note)}">위키 엔티티 →</button>` : ""}
             </div>
           </div>
           <div class="ob-card__body">
+            ${renderGroup("밸류에이션 데스크 (Story · Decision)", b.desk_notes)}
             ${renderGroup("어닝콜 시계열", b.call_notes)}
             ${renderGroup("대형 행사 · IR", b.event_notes)}
             ${renderGroup("개인 생각 · 참고 노트", b.thought_notes)}
@@ -1412,6 +1414,7 @@
               </div>
               <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:12px;border-top:1px solid var(--hairline);">
                 <button class="ob-btn ob-btn--xs" data-note-path="${esc(s.path)}">THESIS NOTE →</button>
+                ${hubBucket.valuation_note && state.byPath[hubBucket.valuation_note] ? `<button class="ob-btn ob-btn--xs ob-btn--primary" data-note-path="${esc(hubBucket.valuation_note)}">DAMODARAN DCF</button>` : ""}
                 ${callPath && state.byPath[callPath] ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(callPath)}">EARNINGS SERIES</button>` : ""}
                 ${eventPath && state.byPath[eventPath] ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(eventPath)}">EVENT 5-BOX</button>` : ""}
                 ${wikiTarget ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(wikiTarget.path)}">WIKI ENTITY</button>` : ""}
@@ -1485,6 +1488,8 @@
             <button class="ob-btn ob-btn--xs" data-note-path="9. Wiki/index.md">WIKI INDEX</button>
             <button class="ob-btn ob-btn--xs" data-note-path="9. Wiki/공식 보도자료.md">OFFICIAL IR</button>
             <button class="ob-btn ob-btn--xs" data-note-path="9. Wiki/SEC 공시.md">SEC FILINGS</button>
+            ${state.byPath["10. Equity Desk/04_Dashboards/US_Stock_Desk.md"] ? `<button class="ob-btn ob-btn--xs ob-btn--primary" data-note-path="10. Equity Desk/04_Dashboards/US_Stock_Desk.md">VALUATION DESK</button>` : ""}
+            ${state.byPath["10. Equity Desk/01_Macro_Desk/US_Macro_Pulse.md"] ? `<button class="ob-btn ob-btn--xs" data-note-path="10. Equity Desk/01_Macro_Desk/US_Macro_Pulse.md">MACRO PULSE</button>` : ""}
           </div>
         </div>
         <div class="ob-card__body">
@@ -2326,6 +2331,7 @@
       } else if (id === "btn-dispatch-workflows") {
         const workflows = [
           { file: "sigma-gdrive-sync.yml", inputs: { mode: "bidirectional" } },
+          { file: "sigma-equity-desk.yml", inputs: {} },
           { file: "sigma-inbox-sync.yml", inputs: { apply: true } },
           { file: "sigma-macro-sync.yml", inputs: {} },
           { file: "sigma-ir-sync.yml", inputs: {} },
@@ -2334,10 +2340,21 @@
         try {
           target.disabled = true;
           showToast("DISPATCHING WORKFLOWS...");
+          let okCount = 0;
+          const skipped = [];
           for (const wf of workflows) {
-            await ghTriggerWorkflow(wf.file, wf.inputs);
+            try {
+              await ghTriggerWorkflow(wf.file, wf.inputs);
+              okCount += 1;
+            } catch (_) {
+              skipped.push(wf.file.replace(".yml", ""));
+            }
           }
-          showToast(`OK — WORKFLOWS DISPATCHED (${workflows.length})`);
+          showToast(
+            skipped.length
+              ? `OK — DISPATCHED ${okCount}/${workflows.length} (건너뜀: ${skipped.join(", ")})`
+              : `OK — WORKFLOWS DISPATCHED (${okCount})`
+          );
         } catch (err) {
           showToast(err.message);
         } finally {
