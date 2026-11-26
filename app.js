@@ -10,20 +10,30 @@
     repo: "sigma_web_repo",
     tokenPlain: "sigma_web_pat",
     tokenEnc: "sigma_web_pat_enc",
+    patExpiry: "sigma_web_pat_expiry",
+    safeWrite: "sigma_web_safe_write",
   };
 
   const state = {
     repo: localStorage.getItem(STORAGE_KEYS.repo) || REPO_DEFAULT,
-    token: localStorage.getItem(STORAGE_KEYS.tokenPlain) || sessionStorage.getItem(STORAGE_KEYS.tokenPlain) || "",
+    token: sessionStorage.getItem(STORAGE_KEYS.tokenPlain) || localStorage.getItem(STORAGE_KEYS.tokenPlain) || "",
+    patExpiry: localStorage.getItem(STORAGE_KEYS.patExpiry) || "",
+    safeWriteMode: localStorage.getItem(STORAGE_KEYS.safeWrite) !== "false",
     cloudVaultEnc: null, // Loaded from ./auth-vault.json if present on GitHub Pages
     mode: "loading", // "local" | "github" | "locked"
     generatedAt: "",
     notes: [],
     byPath: {},
     byName: {},
+    tickersIndex: {},
+    themesIndex: {},
+    conflicts: [],
+    remoteShas: {},
     activeTab: "triage",
     thoughtFilter: "all",
     investingSubtab: "stocks",
+    hubTicker: "",
+    hubTheme: "",
     wikiFilter: "all",
     currentNotePath: "8. System/분류하기.md",
     editingNote: false,
@@ -161,7 +171,47 @@
     return res.json();
   }
 
+  function b64ToUtf8(b64) {
+    const clean = String(b64 || "").replace(/\s+/g, "");
+    const bin = atob(clean);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+
+  async function ghGetBlobByPath(relPath) {
+    const parts = relPath.split("/");
+    const fileName = parts.pop();
+    const dirPath = parts.join("/");
+    const listUrl = dirPath
+      ? `/repos/${state.repo}/contents/${encodeRepoPath(dirPath)}?ref=main`
+      : `/repos/${state.repo}/contents?ref=main`;
+    const entries = await ghFetch(listUrl);
+    if (!Array.isArray(entries)) throw new Error(`ERROR — 경로 목록을 불러올 수 없습니다: ${relPath}`);
+    const match = entries.find((item) => item.name === fileName);
+    if (!match || !match.sha) throw new Error(`ERROR — 원격 파일을 찾을 수 없습니다: ${relPath}`);
+    state.remoteShas[relPath] = match.sha;
+    const blob = await ghFetch(`/repos/${state.repo}/git/blobs/${match.sha}`);
+    return b64ToUtf8(blob.content || "");
+  }
+
   async function ghGetFileRaw(relPath) {
+    try {
+      const meta = await ghFetch(`/repos/${state.repo}/contents/${encodeRepoPath(relPath)}?ref=main`);
+      if (meta && meta.sha) state.remoteShas[relPath] = meta.sha;
+      if (meta && typeof meta.content === "string" && meta.encoding === "base64") {
+        return b64ToUtf8(meta.content);
+      }
+      if (meta && meta.sha) {
+        const blob = await ghFetch(`/repos/${state.repo}/git/blobs/${meta.sha}`);
+        return b64ToUtf8(blob.content || "");
+      }
+    } catch (err) {
+      if (String(err.message || "").includes("403") || String(err.message || "").includes("too_large")) {
+        return ghGetBlobByPath(relPath);
+      }
+      throw err;
+    }
     return ghFetch(`/repos/${state.repo}/contents/${encodeRepoPath(relPath)}?ref=main`, { raw: true });
   }
 
@@ -173,7 +223,17 @@
     } catch (_) {
       // new file
     }
-    return ghFetch(`/repos/${targetRepo}/contents/${encodeRepoPath(relPath)}`, {
+    const knownSha = state.remoteShas[relPath];
+    if (knownSha && sha && knownSha !== sha) {
+      const force = window.confirm(
+        `[충돌 감지] '${relPath}' 파일이 방금 전 Google Drive 동기화나 다른 기기에서 변경되었습니다.\n` +
+        `그래도 현재 웹 내용으로 덮어쓸까요? (취소 후 SYNC ↗ 버튼을 누르면 최신본을 불러옵니다)`
+      );
+      if (!force) {
+        throw new Error("CANCELLED — 원격 변경 감지(SYNC ↗로 최신본 확인 필요)");
+      }
+    }
+    const res = await ghFetch(`/repos/${targetRepo}/contents/${encodeRepoPath(relPath)}`, {
       method: "PUT",
       body: {
         message: commitMsg,
@@ -182,6 +242,10 @@
         branch: "main",
       },
     });
+    if (res && res.content && res.content.sha) {
+      state.remoteShas[relPath] = res.content.sha;
+    }
+    return res;
   }
 
   async function ghPutFile(relPath, contentStr, commitMsg, targetRepo = state.repo) {
@@ -264,6 +328,9 @@
   function indexNotes(data) {
     state.generatedAt = data.generated_at || "";
     state.notes = data.notes || [];
+    state.tickersIndex = data.tickers_index || {};
+    state.themesIndex = data.themes_index || {};
+    state.conflicts = data.conflicts || [];
     state.byPath = {};
     state.byName = {};
     for (const n of state.notes) {
@@ -904,6 +971,248 @@
   }
 
   /* 1. Triage / Home View (Integrated Minimal Quick Sigma Inbox) */
+  /* -------------------- V2.5 Enhancements: Provenance, Radar, Triage, Hub -------------------- */
+  function renderAuthorBadge(note) {
+    const layer = note.author_layer || (note.top_folder === "Clippings" ? "raw" : note.top_folder === "9. Wiki" ? "llm" : "human");
+    if (layer === "raw") return `<span class="ob-badge ob-badge--warning">🔒 RAW</span>`;
+    if (layer === "llm") return `<span class="ob-badge ob-badge--ai">🤖 LLM WIKI</span>`;
+    if (layer === "hybrid") return `<span class="ob-badge ob-badge--info">⚡ HYBRID</span>`;
+    return `<span class="ob-badge ob-badge--low">✍️ HUMAN</span>`;
+  }
+
+  function addDaysStr(baseDateStr, days) {
+    const d = new Date(String(baseDateStr || todayStr()).slice(0, 10) + "T00:00:00Z");
+    if (isNaN(d)) return todayStr();
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function renderConflictBanner() {
+    if (!state.conflicts || !state.conflicts.length) return "";
+    return `
+      <div class="ob-card" style="border-color:var(--down, #dc2626);margin-bottom:18px;">
+        <div class="ob-card__head" style="background:rgba(220,38,38,0.08);">
+          <span>⚠ GOOGLE DRIVE SYNC CONFLICT (${state.conflicts.length}) // 동시 수정 충돌 감지</span>
+          <span class="ob-badge ob-badge--down">ACTION REQUIRED</span>
+        </div>
+        <div class="ob-card__body">
+          <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px;">
+            GitHub과 Google Drive에서 동시에 수정된 파일이 보존되었습니다. 두 노트를 비교·병합한 뒤 <code>.conflict-gdrive-*</code> 사본을 삭제하면 알림이 사라집니다.
+          </div>
+          ${state.conflicts
+            .map(
+              (c) => `
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--hairline);">
+                <span class="ob-mono" style="font-size:12.5px;">${esc(c.original_file)}</span>
+                <div style="display:flex;gap:6px;">
+                  <button class="ob-btn ob-btn--xs" data-note-path="${esc(c.original_file)}">원본 열기</button>
+                  <button class="ob-btn ob-btn--xs ob-btn--primary" data-note-path="${esc(c.conflict_file)}">드라이브 사본 열기</button>
+                </div>
+              </div>`
+            )
+            .join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderReviewAndStalenessRadar() {
+    const today = todayStr();
+    const dueStocks = state.notes
+      .filter((n) => n.folder === "6. Resources/Stocks" && n.props.position !== "매도")
+      .map((n) => {
+        const diff = n.props.next_review ? daysBetween(n.props.next_review, today) : null;
+        return { note: n, diff };
+      })
+      .filter((x) => x.diff !== null && x.diff <= 30)
+      .sort((a, b) => a.diff - b.diff);
+
+    const staleWikis = state.notes
+      .filter((n) => n.top_folder === "9. Wiki" && ((n.stale_sources && n.stale_sources.length > 0) || (n.props.wiki_type && ["entity", "concept", "synthesis"].includes(n.props.wiki_type) && daysBetween(today, n.mtime) > 60)))
+      .slice(0, 8);
+
+    const patWarn = (() => {
+      if (!state.patExpiry) return "";
+      const left = daysBetween(state.patExpiry, today);
+      if (left !== null && left <= 7) {
+        return `<div class="ob-mono" style="font-size:12px;color:var(--down, #dc2626);margin-bottom:10px;">⚠ Fine-grained PAT 만료 임박 (D${left >= 0 ? "-" + left : "+" + Math.abs(left)} · ${esc(state.patExpiry)}) — AUTH 창에서 갱신하세요.</div>`;
+      }
+      return "";
+    })();
+
+    const triageTargets = state.notes
+      .filter(
+        (n) =>
+          (n.top_folder === "0. Inbox" && n.props.done !== true) ||
+          (n.props.kind === "생각" && (!n.props.stage || n.props.stage === "임시"))
+      )
+      .slice(0, 6);
+
+    if (!dueStocks.length && !staleWikis.length && !triageTargets.length && !patWarn) return "";
+
+    return `
+      <div class="ob-card" style="margin-bottom:20px;">
+        <div class="ob-card__head">
+          <span>RADAR // 복기 일정 · 위키 신선도 · Frontmatter 원클릭 분류</span>
+          <span class="ob-mono" style="font-size:11px;color:var(--muted);">SAFE WRITE: ${state.safeWriteMode ? "ON" : "OFF"}</span>
+        </div>
+        <div class="ob-card__body">
+          ${patWarn}
+          <div class="grid-2" style="gap:16px;">
+            <div>
+              <div class="label" style="margin-bottom:8px;">📈 종목 점검 레이더 (${dueStocks.length})</div>
+              ${
+                dueStocks.length
+                  ? dueStocks
+                      .map(({ note, diff }) => {
+                        const badgeCls = diff <= 0 ? "ob-badge--down" : diff <= 14 ? "ob-badge--warning" : "ob-badge--info";
+                        const label = diff <= 0 ? `D+${Math.abs(diff)} 지연` : `D-${diff}`;
+                        const cycle = Number(note.props.review_cycle_days) || 30;
+                        return `
+                          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--hairline);">
+                            <div style="min-width:0;">
+                              <span class="ob-badge ${badgeCls}">${label}</span>
+                              ${noteLinkHTML(note.path, note.name)}
+                            </div>
+                            <button class="ob-btn ob-btn--xs" data-review-done="${esc(note.path)}" data-review-cycle="${cycle}">점검완료 +${cycle}일</button>
+                          </div>`;
+                      })
+                      .join("")
+                  : `<div style="font-size:12.5px;color:var(--muted);">30일 내 점검 예정 종목이 없습니다.</div>`
+              }
+              <div class="label" style="margin:14px 0 8px;">🤖 재합성 필요 위키 (${staleWikis.length})</div>
+              ${
+                staleWikis.length
+                  ? staleWikis
+                      .map(
+                        (w) => `
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--hairline);">
+                          ${noteLinkHTML(w.path, w.name)}
+                          <span class="ob-badge ob-badge--warning">${w.stale_sources && w.stale_sources.length ? `신규출처 ${w.stale_sources.length}건` : `노후(${w.mtime})`}</span>
+                        </div>`
+                      )
+                      .join("")
+                  : `<div style="font-size:12.5px;color:var(--muted);">모든 LLM 위키가 최신 출처와 동기화되어 있습니다.</div>`
+              }
+            </div>
+            <div>
+              <div class="label" style="margin-bottom:8px;">⚡ 폴더 이동 없는 Frontmatter 빠른 분류 (${triageTargets.length})</div>
+              ${
+                triageTargets.length
+                  ? triageTargets
+                      .map(
+                        (t) => `
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--hairline);">
+                          <div style="min-width:0;flex:1;">
+                            ${renderAuthorBadge(t)}
+                            ${noteLinkHTML(t.path, t.name)}
+                          </div>
+                          <div style="display:flex;gap:4px;">
+                            <button class="ob-btn ob-btn--xs" data-fm-action="processing" data-fm-path="${esc(t.path)}">처리중</button>
+                            ${t.props.kind === "생각" ? `<button class="ob-btn ob-btn--xs ob-btn--ai" data-fm-action="promote_perm" data-fm-path="${esc(t.path)}">영구승격</button>` : ""}
+                            <button class="ob-btn ob-btn--xs" data-fm-action="done" data-fm-path="${esc(t.path)}">완료</button>
+                          </div>
+                        </div>`
+                      )
+                      .join("")
+                  : `<div style="font-size:12.5px;color:var(--muted);">대기 중인 수집함·임시 생각이 없습니다.</div>`
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderTickerThemeHub() {
+    const tickers = Object.keys(state.tickersIndex || {}).sort((a, b) => {
+      const sa = state.tickersIndex[a]?.stock_note ? 0 : 1;
+      const sb = state.tickersIndex[b]?.stock_note ? 0 : 1;
+      return sa - sb || (state.tickersIndex[b]?.total || 0) - (state.tickersIndex[a]?.total || 0);
+    });
+    const themes = Object.keys(state.themesIndex || {});
+
+    if (!state.hubTicker && !state.hubTheme && tickers.length) {
+      state.hubTicker = tickers[0];
+    }
+
+    let detailHtml = `<div style="color:var(--muted);font-size:13px;">위 티커 또는 테마를 선택하면 관련 투자 논리·위키·어닝콜·SEC·개인 생각 노트가 한 화면에 집계됩니다.</div>`;
+
+    if (state.hubTicker && state.tickersIndex[state.hubTicker]) {
+      const b = state.tickersIndex[state.hubTicker];
+      const renderGroup = (title, paths) => {
+        const valid = (paths || []).filter((p) => state.byPath[p]);
+        if (!valid.length) return "";
+        return `
+          <div style="margin-bottom:14px;">
+            <div class="label" style="margin-bottom:6px;">${esc(title)} (${valid.length})</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              ${valid.map((p) => `<button class="ob-btn ob-btn--xs" data-note-path="${esc(p)}">${esc(state.byPath[p].name)} →</button>`).join("")}
+            </div>
+          </div>`;
+      };
+      detailHtml = `
+        <div class="ob-card" style="margin-top:14px;">
+          <div class="ob-card__head">
+            <span><span class="ob-ticker">${esc(b.ticker)}</span> TICKER HUB // 연결 노트 총 ${b.total}건</span>
+            <div style="display:flex;gap:6px;">
+              ${b.stock_note ? `<button class="ob-btn ob-btn--xs ob-btn--primary" data-note-path="${esc(b.stock_note)}">투자 논리 →</button>` : ""}
+              ${b.entity_note ? `<button class="ob-btn ob-btn--xs ob-btn--ai" data-note-path="${esc(b.entity_note)}">위키 엔티티 →</button>` : ""}
+            </div>
+          </div>
+          <div class="ob-card__body">
+            ${renderGroup("어닝콜 시계열", b.call_notes)}
+            ${renderGroup("대형 행사 · IR", b.event_notes)}
+            ${renderGroup("개인 생각 · 참고 노트", b.thought_notes)}
+            ${renderGroup("위키 종합 · 출처", b.wiki_notes)}
+            ${renderGroup("SEC 공시 (최신순)", [...(b.sec_notes || [])].reverse().slice(0, 10))}
+            ${renderGroup("원본 클리핑", (b.clipping_notes || []).slice(0, 10))}
+          </div>
+        </div>`;
+    } else if (state.hubTheme && state.themesIndex[state.hubTheme]) {
+      const paths = state.themesIndex[state.hubTheme].filter((p) => state.byPath[p]);
+      detailHtml = renderBaseTable(
+        `THEME HUB // ${state.hubTheme} (${paths.length})`,
+        ["NOTE", "LAYER", "FOLDER", "UPDATED"],
+        paths.map((p) => {
+          const n = state.byPath[p];
+          return [
+            noteLinkHTML(n.path, n.name),
+            renderAuthorBadge(n),
+            `<span class="ob-badge">${esc(n.top_folder)}</span>`,
+            `<span class="ob-mono">${esc(n.mtime)}</span>`,
+          ];
+        })
+      );
+    }
+
+    return `
+      <div style="margin-bottom:14px;">
+        <div class="label" style="margin-bottom:8px;">TICKERS (${tickers.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">
+          ${tickers
+            .map(
+              (tk) =>
+                `<button class="ob-chip ${state.hubTicker === tk ? "is-active" : ""}" data-hub-ticker="${esc(tk)}">${esc(tk)} (${state.tickersIndex[tk].total})</button>`
+            )
+            .join("")}
+        </div>
+        <div class="label" style="margin-bottom:8px;">THEMES &amp; CONCEPTS (${themes.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${themes
+            .slice(0, 24)
+            .map(
+              (th) =>
+                `<button class="ob-chip ${state.hubTheme === th ? "is-active" : ""}" data-hub-theme="${esc(th)}">${esc(th)} (${state.themesIndex[th].length})</button>`
+            )
+            .join("")}
+        </div>
+      </div>
+      ${detailHtml}
+    `;
+  }
+
+  /* 1. Triage / Home View */
   function renderTriageView() {
     const latestDaily = state.notes
       .filter((n) => n.top_folder === "1. Daily Note")
@@ -936,6 +1245,8 @@
         </div>
       </div>
 
+      ${renderConflictBanner()}
+      ${renderReviewAndStalenessRadar()}
       ${window.SIGMA_V2 ? window.SIGMA_V2.renderHabitHeatmapPanel(state) : ""}
 
       <div class="grid-2">
@@ -1049,10 +1360,11 @@
 
     const stockCards = stocks
       .map((s) => {
-        const ticker = String(s.props.ticker || s.name.split(" ")[0]);
-        const wikiTarget = resolveNoteLink(s.props.wiki || ticker);
-        const callPath = callSourceMap[ticker];
-        const eventPath = eventSourceMap[ticker];
+        const ticker = String(s.props.ticker || s.name.split(" ")[0]).toUpperCase();
+        const hubBucket = state.tickersIndex[ticker] || {};
+        const wikiTarget = resolveNoteLink(s.props.wiki || ticker) || (hubBucket.entity_note ? state.byPath[hubBucket.entity_note] : null);
+        const callPath = (hubBucket.call_notes && hubBucket.call_notes[0]) || callSourceMap[ticker];
+        const eventPath = (hubBucket.event_notes && hubBucket.event_notes[0]) || eventSourceMap[ticker];
         return `
           <div class="ob-card" style="margin-bottom:0;display:flex;flex-direction:column;justify-content:space-between;">
             <div class="ob-card__head">
@@ -1093,6 +1405,8 @@
           <div>${renderQuickPreviewPanel("9. Wiki/AI 인프라 신용 점검.md", "AI INFRA CREDIT // 보증 · XPV · FCF 신용 점검")}</div>
         </div>
       `;
+    } else if (state.investingSubtab === "hub") {
+      subContent = renderTickerThemeHub();
     } else if (state.investingSubtab === "calls") {
       const callPaths = [
         "9. Wiki/Sources/src-nvda-earnings-calls-fy25-fy27.md",
@@ -1151,6 +1465,7 @@
             <button class="ob-chip ${state.investingSubtab === "stocks" ? "is-active" : ""}" data-inv-sub="stocks">01 // 핵심 보유 6종목 &amp; 매크로·신용</button>
             <button class="ob-chip ${state.investingSubtab === "calls" ? "is-active" : ""}" data-inv-sub="calls">02 // 어닝콜 46건 + 대형행사 2건 시계열</button>
             <button class="ob-chip ${state.investingSubtab === "wiki" ? "is-active" : ""}" data-inv-sub="wiki">03 // LLM 위키 전체 탐색 (${wikiNotes.length})</button>
+            <button class="ob-chip ${state.investingSubtab === "hub" ? "is-active" : ""}" data-inv-sub="hub">04 // 티커 · 테마 허브 (${Object.keys(state.tickersIndex || {}).length})</button>
           </div>
           ${subContent}
         </div>
@@ -1228,6 +1543,32 @@
           .join("")}</div>`
       : "";
 
+    const provenanceHtml =
+      note.top_folder === "9. Wiki"
+        ? `<div class="ob-block" style="padding:10px 14px;margin-bottom:14px;border:2px solid var(--frame);">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+              <div>${renderAuthorBadge(note)} <span class="ob-mono" style="font-size:12px;margin-left:6px;">COMPILED: ${esc(note.props.last_compiled || note.props.updated || note.mtime)}</span></div>
+              ${
+                note.stale_sources && note.stale_sources.length
+                  ? `<span class="ob-badge ob-badge--warning">⚠ 재합성 권장 · 신규 출처 ${note.stale_sources.length}건</span>`
+                  : `<span class="ob-badge ob-badge--low">✓ 출처 최신 일치</span>`
+              }
+            </div>
+            ${
+              note.stale_sources && note.stale_sources.length
+                ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">
+                    ${note.stale_sources
+                      .map((sp) => {
+                        const sn = state.byPath[sp];
+                        return sn ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(sp)}">갱신된 출처: ${esc(sn.name)} →</button>` : "";
+                      })
+                      .join("")}
+                  </div>`
+                : ""
+            }
+          </div>`
+        : "";
+
     const backlinksHtml = note.backlinks && note.backlinks.length
       ? `<div style="margin-top:32px;padding-top:16px;border-top:3px solid var(--frame);">
           <div class="label" style="margin-bottom:10px;color:var(--muted);">BACKLINKS // 이 노트를 인용한 연결 노트 (${note.backlinks.length})</div>
@@ -1264,6 +1605,7 @@
       `;
     } else {
       readerBodyHtml = `
+        ${provenanceHtml}
         ${propsHtml}
         <div class="md-body">${renderMarkdown(note.body, note)}</div>
         ${
@@ -1301,11 +1643,12 @@
               <button class="ob-btn ob-btn--xs ${splitActive ? "ob-btn--ai" : ""}" id="btn-toggle-split" title="좌측 원문/위키 + 우측 생각/종목 노트 동시 비교·편집">
                 ${splitActive ? "CLOSE SPLIT [✕]" : "◨ SPLIT PANE // 좌우 분할 비교·편집"}
               </button>
+              ${renderAuthorBadge(note)}
               ${
                 isClipping
                   ? `<span class="ob-badge ob-badge--warning" title="CLAUDE.md 규칙에 따라 Clippings 원본은 수정하지 않고 보존합니다">RAW CLIPPING · READ ONLY</span>`
-                  : `<button class="ob-btn ob-btn--xs ${state.editingNote ? "ob-btn--primary" : ""}" id="btn-toggle-edit">${
-                      state.editingNote ? "VIEW MODE" : "EDIT NOTE"
+                  : `<button class="ob-btn ob-btn--xs ${state.editingNote ? "ob-btn--primary" : ""}" id="btn-toggle-edit" title="Safe Write 모드에서는 확인 후 본문 편집 모드로 전환합니다">${
+                      state.editingNote ? "VIEW MODE" : (state.safeWriteMode ? "FULL EDIT 🔒" : "EDIT NOTE")
                     }</button>`
               }
               <a href="https://github.com/${esc(state.repo)}/blob/main/${encodeRepoPath(note.path)}" target="_blank" rel="noopener" class="ob-btn ob-btn--xs">GITHUB ↗</a>
@@ -1567,13 +1910,21 @@
         <label class="label" style="display:block;margin-bottom:4px;">GITHUB PERSONAL ACCESS TOKEN (PAT)</label>
         <input type="password" id="modal-pat-input" class="input" value="${esc(state.token)}" placeholder="github_pat_... 또는 ghp_..." />
       </div>
+      <div style="margin-bottom:12px;">
+        <label class="label" style="display:block;margin-bottom:4px;">FINE-GRAINED PAT EXPIRY // 토큰 만료일 알림 (선택, D-7 경고)</label>
+        <input type="date" id="modal-pat-expiry" class="input" value="${esc(state.patExpiry)}" />
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px;cursor:pointer;">
+        <input type="checkbox" id="modal-remember-device" class="task-toggle" ${autoLoginActive ? "checked" : ""} />
+        <span><strong>이 기기에서 자동 로그인 유지</strong> (개인 기기만 권장 · 공용 PC에서는 해제하고 아래 비밀번호 사용)</span>
+      </label>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:14px;cursor:pointer;">
-        <input type="checkbox" id="modal-remember-device" class="task-toggle" checked />
-        <span><strong>이 기기에서 자동 로그인 유지</strong> (다음부터 PAT/비밀번호 입력 없이 바로 열림)</span>
+        <input type="checkbox" id="modal-safe-write" class="task-toggle" ${state.safeWriteMode ? "checked" : ""} />
+        <span><strong>Safe Write 모드 유지</strong> (집 PC Obsidian·Google Drive 충돌 방지를 위해 긴 본문 편집 전 확인)</span>
       </label>
       <div style="margin-bottom:16px;">
-        <label class="label" style="display:block;margin-bottom:4px;">OPTIONAL PASSWORD // 다른 기기·잠금용 간편 비밀번호 (선택)</label>
-        <input type="password" id="modal-pin-input" class="input" placeholder="설정 시 AES-256으로 암호화 백업 생성" />
+        <label class="label" style="display:block;margin-bottom:4px;">OPTIONAL PASSWORD // AES-256-GCM 간편 비밀번호 (권장)</label>
+        <input type="password" id="modal-pin-input" class="input" placeholder="설정 시 토큰 암호화 보관 (만료 짧은 Fine-grained PAT 권장)" />
       </div>
       <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
         <button class="ob-btn ob-btn--sm" id="btn-clear-auth">LOGOUT / RESET</button>
@@ -1587,7 +1938,7 @@
   function bindEvents() {
     document.addEventListener("click", async (e) => {
       const target = e.target.closest(
-        "[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-chart-ticker],[data-chart-idx],[data-graph-depth],[data-cal-date],[data-remove-clip-idx],button"
+        "[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-chart-ticker],[data-chart-idx],[data-graph-depth],[data-cal-date],[data-remove-clip-idx],[data-hub-ticker],[data-hub-theme],[data-fm-action],[data-review-done],button"
       );
       if (!target) return;
 
@@ -1683,6 +2034,75 @@
       if (target.hasAttribute("data-wiki-filter")) {
         state.wikiFilter = target.getAttribute("data-wiki-filter");
         renderAll();
+        return;
+      }
+
+      if (target.hasAttribute("data-hub-ticker")) {
+        state.hubTicker = target.getAttribute("data-hub-ticker");
+        state.hubTheme = "";
+        renderAll();
+        return;
+      }
+
+      if (target.hasAttribute("data-hub-theme")) {
+        state.hubTheme = target.getAttribute("data-hub-theme");
+        state.hubTicker = "";
+        renderAll();
+        return;
+      }
+
+      if (target.hasAttribute("data-fm-action")) {
+        const action = target.getAttribute("data-fm-action");
+        const p = target.getAttribute("data-fm-path");
+        const n = state.byPath[p];
+        if (!n) return;
+        const nextProps = { ...n.props, updated: todayStr() };
+        if (action === "processing") {
+          nextProps.status = "processing";
+        } else if (action === "promote_perm") {
+          nextProps.stage = "영구";
+          nextProps.status = "evergreen";
+          nextProps.reviewed = todayStr();
+        } else if (action === "done") {
+          nextProps.done = true;
+          nextProps.status = "evergreen";
+        }
+        const newRaw = serializeFrontmatterJS(nextProps, n.body);
+        upsertNoteInMemory(p, newRaw);
+        renderAll();
+        if (state.token) {
+          try {
+            await ghPutFile(p, newRaw, `chore(triage): ${action} on ${n.name} via Sigma OS Web`);
+            showToast(`OK — FRONTMATTER UPDATED (${action})`);
+          } catch (err) {
+            showToast(err.message);
+          }
+        } else {
+          showToast(`OK — LOCAL FRONTMATTER UPDATED (${action})`);
+        }
+        return;
+      }
+
+      if (target.hasAttribute("data-review-done")) {
+        const p = target.getAttribute("data-review-done");
+        const cycle = parseInt(target.getAttribute("data-review-cycle"), 10) || 30;
+        const n = state.byPath[p];
+        if (!n) return;
+        const nextDate = addDaysStr(todayStr(), cycle);
+        const nextProps = { ...n.props, next_review: nextDate, updated: todayStr(), review_cycle_days: cycle };
+        const newRaw = serializeFrontmatterJS(nextProps, n.body);
+        upsertNoteInMemory(p, newRaw);
+        renderAll();
+        if (state.token) {
+          try {
+            await ghPutFile(p, newRaw, `chore(stocks): review done -> next_review=${nextDate} on ${n.name}`);
+            showToast(`OK — 다음 점검일 ${nextDate}로 갱신됨`);
+          } catch (err) {
+            showToast(err.message);
+          }
+        } else {
+          showToast(`OK — 다음 점검일 ${nextDate}로 로컬 갱신됨`);
+        }
         return;
       }
 
@@ -1877,6 +2297,7 @@
         syncSelectedClippingsUI();
       } else if (id === "btn-dispatch-workflows") {
         const workflows = [
+          { file: "sigma-gdrive-sync.yml", inputs: { mode: "bidirectional" } },
           { file: "sigma-inbox-sync.yml", inputs: { apply: true } },
           { file: "sigma-macro-sync.yml", inputs: {} },
           { file: "sigma-ir-sync.yml", inputs: {} },
@@ -1926,6 +2347,12 @@
           target.disabled = false;
         }
       } else if (id === "btn-toggle-edit") {
+        if (!state.editingNote && state.safeWriteMode) {
+          const ok = window.confirm(
+            "[Safe Write 모드] 집 PC Obsidian(Google Drive)과의 동시 편집 충돌을 줄이기 위해 웹 전체 편집은 권장하지 않습니다.\n이 노트의 전체 편집 모드를 열까요?"
+          );
+          if (!ok) return;
+        }
         state.editingNote = !state.editingNote;
         renderAll();
       } else if (id === "btn-cancel-edit") {
@@ -1944,6 +2371,17 @@
         const ta = document.getElementById("note-editor-textarea");
         if (!ta) return;
         const newRaw = ta.value;
+        const prevNote = state.byPath[state.currentNotePath];
+        if (prevNote && prevNote.body.includes("## 원래 메모")) {
+          const prevOrig = prevNote.body.split("## 원래 메모")[1] || "";
+          const nextOrig = newRaw.includes("## 원래 메모") ? (newRaw.split("## 원래 메모")[1] || "") : null;
+          if (nextOrig === null || nextOrig.trim() !== prevOrig.trim()) {
+            const proceed = window.confirm(
+              "[원문 보존 원칙 경고] '## 원래 메모' 섹션이 변경되거나 삭제되었습니다. 그래도 저장할까요?"
+            );
+            if (!proceed) return;
+          }
+        }
         upsertNoteInMemory(state.currentNotePath, newRaw);
         state.editingNote = false;
         renderAll();
@@ -1974,6 +2412,16 @@
         const repoVal = document.getElementById("modal-repo-input")?.value || state.repo;
         const patVal = (document.getElementById("modal-pat-input")?.value || document.getElementById("auth-pat-direct")?.value || "").trim();
         const pinVal = (document.getElementById("modal-pin-input")?.value || document.getElementById("auth-pin-setup")?.value || "").trim();
+        const expiryEl = document.getElementById("modal-pat-expiry");
+        if (expiryEl) {
+          state.patExpiry = expiryEl.value.trim();
+          localStorage.setItem(STORAGE_KEYS.patExpiry, state.patExpiry);
+        }
+        const safeWriteEl = document.getElementById("modal-safe-write");
+        if (safeWriteEl) {
+          state.safeWriteMode = Boolean(safeWriteEl.checked);
+          localStorage.setItem(STORAGE_KEYS.safeWrite, String(state.safeWriteMode));
+        }
         const remember =
           (document.getElementById("modal-remember-device")?.checked ??
             document.getElementById("auth-remember-direct")?.checked ??
