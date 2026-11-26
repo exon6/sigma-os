@@ -405,7 +405,20 @@
     const badge = document.getElementById("connection-badge");
     if (badge) badge.textContent = "LOADING...";
 
-    // 1. Always load bundled ./vault-index.json or local ../../.sigma-sync/vault-index.json immediately (ZERO PAT / ZERO PASSWORD!)
+    // 0. Check optional encrypted cloud vault backup (if present)
+    try {
+      const encRes = await fetch("./auth-vault.json", { cache: "no-store" });
+      if (encRes.ok) {
+        const encJson = await encRes.json();
+        if (encJson && encJson.ciphertext) {
+          state.cloudVaultEnc = JSON.stringify(encJson);
+        }
+      }
+    } catch (_) {}
+
+    let loadedAny = false;
+
+    // 1. Load local ../../.sigma-sync/vault-index.json (when opened locally) or optional ./vault-index.json
     for (const candidate of ["./vault-index.json", "../../.sigma-sync/vault-index.json"]) {
       try {
         const res = await fetch(candidate, { cache: "no-store" });
@@ -413,6 +426,7 @@
           const parsed = await res.json();
           indexNotes(parsed);
           state.mode = "ready";
+          loadedAny = true;
           if (badge) {
             badge.textContent = `LIVE · ${state.notes.length} NOTES`;
           }
@@ -422,17 +436,31 @@
       } catch (_) {}
     }
 
-    // 2. If GitHub token happens to be configured, silently refresh latest index in background
+    // 2. If GitHub token is configured, fetch latest private index directly from exon6/obsidian-vault
     if (state.token) {
       try {
         const rawJson = await ghGetFileRaw(".sigma-sync/vault-index.json");
         const parsed = JSON.parse(rawJson);
         indexNotes(parsed);
         state.mode = "github";
+        loadedAny = true;
         if (badge) badge.textContent = `LIVE · ${state.notes.length} NOTES`;
         renderAll();
         return;
-      } catch (_) {}
+      } catch (err) {
+        if (badge) badge.textContent = "AUTH ERROR";
+        showToast(err.message || "ERROR — 비공개 볼트 연결에 실패했습니다. AUTH 🔒에서 PAT 권한을 확인하세요.");
+      }
+    }
+
+    // 3. No bundled index and no valid GitHub PAT -> show Private Vault Lock / Auth screen cleanly
+    if (!loadedAny && state.notes.length === 0) {
+      state.mode = "locked";
+      if (badge && badge.textContent === "LOADING...") {
+        badge.textContent = "LOCKED · AUTH";
+      }
+      renderAll();
+      return;
     }
 
     state.mode = "ready";
@@ -1938,7 +1966,7 @@
   function bindEvents() {
     document.addEventListener("click", async (e) => {
       const target = e.target.closest(
-        "[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-chart-ticker],[data-chart-idx],[data-graph-depth],[data-cal-date],[data-remove-clip-idx],[data-hub-ticker],[data-hub-theme],[data-fm-action],[data-review-done],button"
+        "#connection-badge,[data-tab],[data-jump-tab],[data-note-path],[data-search-query],[data-thought-filter],[data-inv-sub],[data-wiki-filter],[data-toggle-folder],[data-chart-ticker],[data-chart-idx],[data-graph-depth],[data-cal-date],[data-remove-clip-idx],[data-hub-ticker],[data-hub-theme],[data-fm-action],[data-review-done],button"
       );
       if (!target) return;
 
@@ -2121,7 +2149,7 @@
         openSearchModal("");
       } else if (id === "btn-close-search") {
         document.getElementById("search-modal")?.classList.remove("open");
-      } else if (id === "btn-open-auth") {
+      } else if (id === "btn-open-auth" || id === "connection-badge") {
         openAuthModal();
       } else if (id === "btn-close-auth") {
         document.getElementById("auth-modal")?.classList.remove("open");
