@@ -32,7 +32,7 @@
     remoteShas: {},
     activeTab: "triage",
     thoughtFilter: "all",
-    investingSubtab: "stocks",
+    investingSubtab: "valuation",
     hubTicker: "",
     hubTheme: "",
     wikiFilter: "all",
@@ -1407,6 +1407,58 @@
     const buyCount = rows.filter((r) => r.mos >= 20 && r.prob >= 70).length;
     const holdCount = rows.filter((r) => r.mos >= 0 && !(r.mos >= 20 && r.prob >= 70)).length;
 
+    const regimeDot = String(regime).includes("골디락스")
+      ? "val-traffic-dot--green"
+      : String(regime).includes("스태그") || String(regime).includes("수축")
+        ? "val-traffic-dot--red"
+        : "val-traffic-dot--amber";
+    const stressDot =
+      stressScore !== null && stressScore >= 60
+        ? "val-traffic-dot--red"
+        : stressScore !== null && stressScore >= 30
+          ? "val-traffic-dot--amber"
+          : "val-traffic-dot--green";
+    const rfNum = mp.rf_us10y !== undefined ? Number(mp.rf_us10y) : null;
+    const rfDot =
+      rfNum !== null && rfNum >= 4.8
+        ? "val-traffic-dot--red"
+        : rfNum !== null && rfNum >= 4.2
+          ? "val-traffic-dot--amber"
+          : "val-traffic-dot--green";
+
+    const maxAbsMos = Math.max(50, ...rows.map((r) => Math.abs(r.mos)));
+    const mosBarChartHtml = !compact && rows.length
+      ? `
+        <div class="val-mos-chart">
+          <div class="val-mos-chart__head">
+            <span>MARGIN OF SAFETY RANKING // 안전마진 순위 분포 차트 (0% 기준선 대비 저평가/고평가 폭)</span>
+            <span style="color:var(--muted);">좌측(-고평가) ◀ 0% ▶ 우측(+안전마진)</span>
+          </div>
+          ${rows
+            .map((r) => {
+              const halfPct = Math.min(50, (Math.abs(r.mos) / maxAbsMos) * 50);
+              const left = r.mos >= 0 ? 50 : 50 - halfPct;
+              const fillCls = r.mos >= 20 ? "val-mos-fill--pos" : r.mos >= 0 ? "val-mos-fill--warn" : "val-mos-fill--neg";
+              const mosClr = r.mos >= 20 ? "var(--up)" : r.mos >= 0 ? "var(--warning)" : "var(--down)";
+              return `
+                <div class="val-mos-row">
+                  <button class="ob-btn ob-btn--xs" style="width:100%;justify-content:center;" data-note-path="${esc(r.note.path)}">${esc(r.ticker)}</button>
+                  <div class="val-mos-bar-wrap" title="${esc(r.ticker)}: 현재가 $${r.cur.toFixed(2)} vs 내재가치 $${r.iv.toFixed(2)} (MOS ${r.mos >= 0 ? "+" : ""}${r.mos.toFixed(1)}%)">
+                    <div class="val-mos-zero"></div>
+                    <div class="val-mos-fill ${fillCls}" style="left:${left.toFixed(1)}%;width:${Math.max(1.5, halfPct).toFixed(1)}%;"></div>
+                  </div>
+                  <span style="text-align:right;font-weight:700;color:${mosClr};">${r.mos >= 0 ? "+" : ""}${r.mos.toFixed(1)}%</span>
+                  <span style="text-align:right;color:var(--muted);">${r.prob.toFixed(0)}%</span>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      `
+      : "";
+
+    const guideNotePath = "10. Equity Desk/02_Methodology/가치평가_및_거시경제_모델_가이드.md";
+
     const tableRowsHtml = rows
       .map((r) => {
         const mosColor = r.mos >= 20 ? "var(--up)" : r.mos >= 0 ? "var(--warning)" : "var(--down)";
@@ -1451,6 +1503,7 @@
         <div class="ob-card__head">
           <span>EQUITY &amp; MACRO DESK // 다모다란 가치평가 · 마틴센 3시장 거시 (${rows.length}종목 · BUY ${buyCount} · HOLD ${holdCount})</span>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${state.byPath[guideNotePath] ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(guideNotePath)}">모델 설명서 →</button>` : ""}
             ${macro ? `<button class="ob-btn ob-btn--xs" data-note-path="${esc(macro.path)}">거시 리포트 →</button>` : ""}
             ${
               compact
@@ -1465,25 +1518,27 @@
           <div class="val-macro-strip">
             <div class="val-kpi-box">
               <span class="val-kpi-box__label">MACRO REGIME (${esc(macroUpdated)})</span>
-              <span class="val-kpi-box__val">${esc(regime)}</span>
+              <span class="val-kpi-box__val"><span class="val-traffic-dot ${regimeDot}"></span>${esc(regime)}</span>
               <span class="val-kpi-box__sub">AS 구간: ${esc(asZone)}</span>
             </div>
             <div class="val-kpi-box">
               <span class="val-kpi-box__label">CREDIT STRESS (0–100)</span>
-              <span class="val-kpi-box__val">${stressScore !== null ? `${stressScore} / 100` : "−"}</span>
+              <span class="val-kpi-box__val"><span class="val-traffic-dot ${stressDot}"></span>${stressScore !== null ? `${stressScore} / 100` : "−"}</span>
               <span class="val-kpi-box__sub">${esc(stressLevel)}</span>
             </div>
             <div class="val-kpi-box">
               <span class="val-kpi-box__label">US 10Y RISK-FREE (RF)</span>
-              <span class="val-kpi-box__val" style="color:var(--accent-ink);">${rfVal}</span>
+              <span class="val-kpi-box__val" style="color:var(--accent-ink);"><span class="val-traffic-dot ${rfDot}"></span>${rfVal}</span>
               <span class="val-kpi-box__sub">FRED 실시간 → WACC·영구성장률 상한</span>
             </div>
             <div class="val-kpi-box">
               <span class="val-kpi-box__label">RECOMMENDED ERP</span>
-              <span class="val-kpi-box__val">${erpVal}</span>
+              <span class="val-kpi-box__val"><span class="val-traffic-dot ${stressDot}"></span>${erpVal}</span>
               <span class="val-kpi-box__sub">스트레스 보정 위험프리미엄 자동 연동</span>
             </div>
           </div>
+
+          ${mosBarChartHtml}
 
           <div class="val-table-wrap">
             <table class="val-table">
